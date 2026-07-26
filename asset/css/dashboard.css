@@ -1,388 +1,349 @@
-/* RESET*/
+/* ============================================================
+   PSU INTERNALIZATION — DASHBOARD
+   Shares the login page's design system:
+   navy sidebar, ink/blue accents, Oswald + Fraunces type
+
+   Color pass: pulled directly from the login page instead of
+   inventing a new palette. The login screen already has a
+   color *language*, not just tokens — navy deepens to
+   navy-deep in the corners, blue-light carries a soft glow
+   wherever something is "live" (the pulsing route node, the
+   dashed flight path, the focus ring), and blue itself is
+   reserved for actionable/interactive moments. This pass
+   brings that same language into the dashboard so the two
+   screens feel like one product, not two separate kits.
+   ============================================================ */
+
 *, *::before, *::after {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
 }
 
-/* ROOT TOKENS*/
 :root {
-    --navy-950:  #040e22;
-    --navy-900:  #071530;
-    --navy-800:  #08254d;
-    --navy-700:  #0d3366;
-    --navy-600:  #1a3f75;
-    --navy-500:  #1e4d8c;
+    /* ---- straight from the login page, unchanged ---- */
+    --navy: #0b1a35;
+    --navy-deep: #071530;
+    --blue: #005fd5;
+    --blue-light: #6695d3;
+    --ink: #0b2343;
+    --muted: #94a3b8;
 
-    --sidebar-bg:      #0b1a35;
-    --sidebar-header:  #0d1f3c;
-    --sidebar-item-hover-bg:  #f0f8ff;
-    --sidebar-item-hover-txt: #0b1a35;
-    --sidebar-active-bg:      #e8f4ff;
-    --sidebar-active-txt:     #08254d;
+    /* dashboard-only extensions of the same palette */
+    --bg: #f4f6fa;
+    --surface: #ffffff;
+    --border: #e2e8f0;
+    --text: #0b2343;
+    --text-soft: #64748b;
+    --text-faint: #c0cad8;
 
-    --accent:        #4a9eff;
-    --accent-glow:   rgba(74, 158, 255, 0.15);
+    --success: #1a9c6b;
+    --success-bg: #eafbf3;
+    --warning: #c47a00;
+    --warning-bg: #fff6e6;
+    --danger: #c40000;
+    --danger-bg: #fff0f0;
+    --info: var(--blue);
+    --info-bg: #e9f2ff;
 
-    --topbar-bg:     #ffffff;
-    --page-bg:       #f2f5fb;
+    /* the login page's "live" glow — used on the pulsing route
+       node and the flight path. Reused here for anything that
+       means active / current / in-progress, so it carries the
+       same meaning across both screens */
+    --glow-blue: 0 0 14px rgba(102, 149, 211, 0.5);
+    --glow-blue-soft: 0 0 0 3px rgba(0, 95, 213, 0.1);
 
-    --text-primary:  #0b2343;
-    --text-muted:    #6b7c99;
-    --border-light:  #dce5f0;
-
-    --sidebar-width:      250px;
-    --sidebar-collapsed:   72px;
-    --topbar-height:        60px;
-
-    --radius-sm:  6px;
-    --radius-md: 10px;
-    --radius-lg: 16px;
-
-    --transition: 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    --sidebar-w: 252px;
+    --topbar-h: 68px;
+    --radius: 10px;
+    --radius-sm: 6px;
+    --shadow-sm: 0 1px 2px rgba(11, 26, 53, 0.06);
+    --shadow-md: 0 10px 30px rgba(11, 26, 53, 0.08);
 }
 
-/* BASE */
+html, body {
+    height: 100%;
+}
+
 body {
-    font-family: 'Oswald', sans-serif;
-    background: var(--page-bg);
-    color: var(--text-primary);
-    min-height: 100vh;
-    -webkit-font-smoothing: antialiased;
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
 }
 
-/* SIDEBAR */
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+ul {
+    list-style: none;
+}
+
+button {
+    font-family: inherit;
+}
+
+/* Base image reset — without this, any <img> that isn't
+   explicitly sized (or that sits outside its expected wrapper,
+   e.g. a raw logo <img> in the sidebar) renders at its native
+   pixel dimensions and blows out the whole fixed layout. This
+   was missing, which is what let the PSU seal render at full
+   size and slide out from under the fixed topbar. */
+img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+}
+
+/* ============================================================
+   SIDEBAR
+   Matches the actual markup from sidebar.php:
+   .main-sidebar > .sidebar-header (.brand > .brand-logo, .brand-text)
+                 > ul.sidebar-menu > li > a (Home)
+                                   > li.sidebar-dropdown > .dropdown-toggle, .dropdown-menu > a
+                 > .sidebar-footer > .logout-btn
+   Icons are Font Awesome <i> tags, not Material Symbols.
+   ============================================================ */
 .main-sidebar {
     position: fixed;
     top: 0;
     left: 0;
-    width: var(--sidebar-width);
+    width: var(--sidebar-w);
     height: 100vh;
-    background: var(--sidebar-bg);
-    color: #fff;
+    /* login's left panel is flat navy but sits on a deep
+       vignette from the world-map mask; a subtle navy →
+       navy-deep drop toward the bottom gives the same sense
+       of depth without needing the map artwork */
+    background: linear-gradient(180deg, var(--navy) 0%, var(--navy) 55%, var(--navy-deep) 100%);
     display: flex;
     flex-direction: column;
-    overflow: hidden;
-    transition: width var(--transition);
-    z-index: 1100;
-
-    /* Subtle left border accent */
-    border-right: 1px solid rgba(255, 255, 255, 0.05);
-
-    /* Depth shadow */
-    box-shadow: 4px 0 24px rgba(4, 14, 34, 0.45);
-}
-
-.main-sidebar.collapsed {
-    width: var(--sidebar-collapsed);
-}
-
-/* =============================================
-   SIDEBAR HEADER
-============================================= */
-
-.sidebar-header{
-    height:80px;
-    padding:15px 18px;
-    background: #040e22;
-    border-bottom:1px solid rgba(255,255,255,.08);
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    flex-shrink:0;
-}
-
-.brand{
-    display:flex;
-    align-items:center;
-    gap:12px;
-    width:100%;
-}
-
-.brand-logo{
-    width:48px;
-    height:48px;
-    object-fit:contain;
-    flex-shrink:0;
-}
-
-.brand-text{
-    display:flex;
-    flex-direction:column;
-    overflow:hidden;
-}
-
-.brand-text h4{
-    margin:0;
-    color:#ffffff;
-    font-size:18px;
-    font-weight:700;
-    line-height:1;
-    letter-spacing:.5px;
-}
-
-.brand-text small{
-    color:rgba(255,255,255,.75);
-    font-size:11px;
-    letter-spacing:.8px;
-    text-transform:uppercase;
-}
-
-/* collapsed sidebar support */
-.main-sidebar.collapsed .brand-text{
-    display:none;
-}
-
-.main-sidebar.collapsed .brand{
-    justify-content:center;
-}
-
-.toggle-btn {
-    background: none;
-    border: none;
-    color: rgba(255, 255, 255, 0.75);
-    font-size: 20px;
-    cursor: pointer;
-    padding: 6px;
-    border-radius: var(--radius-sm);
-    line-height: 1;
-    transition: color var(--transition), background var(--transition);
-    flex-shrink: 0;
-}
-
-.toggle-btn:hover {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.08);
-}
-
-/*   SIDEBAR MENU */
-.sidebar-menu {
-    list-style: none;
-    padding: 10px 10px;
-    flex: 1;
-    overflow-y: auto;
+    z-index: 40;
     overflow-x: hidden;
-    scrollbar-width: none;
+    overflow-y: auto;
+    scrollbar-width: thin;
 }
 
-.sidebar-menu::-webkit-scrollbar {
-    display: none;
+.main-sidebar::-webkit-scrollbar {
+    width: 5px;
 }
 
-/* Section label */
-.sidebar-menu .menu-label {
-    font-size: 10x;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.3);
-    padding: 14px 16px 6px;
-    white-space: nowrap;
-    overflow: hidden;
-    transition: opacity var(--transition);
+.main-sidebar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
 }
 
-.main-sidebar.collapsed .menu-label {
-    opacity: 0;
+/* brand block, echoes the login-left header */
+.sidebar-header {
+    padding: 24px 22px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-/* Menu item */
-.sidebar-menu li {
-    margin: 2px 0;
-}
-
-.sidebar-menu a {
+.brand {
     display: flex;
     align-items: center;
-    gap: 13px;
+    gap: 12px;
+}
+
+.brand-logo {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.08);
+    /* matches .left-logo on the login page exactly:
+       blue-light ring + soft white outline offset */
+    border: 1px solid rgba(102, 149, 211, 0.4);
+    outline: 1px solid rgba(255, 255, 255, 0.12);
+    outline-offset: 3px;
+}
+
+.brand-text h4 {
+    font-family: 'Fraunces', serif;
+    font-optical-sizing: auto;
+    font-size: 16.5px;
+    font-weight: 600;
+    color: #fff;
+    line-height: 1.2;
+}
+
+.brand-text small {
+    display: block;
+    font-family: 'Oswald', sans-serif;
+    font-size: 9.5px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+    margin-top: 2px;
+}
+
+/* nav list */
+.sidebar-menu {
+    flex: 1;
+    padding: 18px 14px 24px;
+}
+
+.sidebar-menu > li {
+    margin-bottom: 2px;
+}
+
+/* both the top-level Home link and every dropdown sub-link
+   share the same nav-row look */
+.sidebar-menu > li > a,
+.dropdown-menu a {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     padding: 10px 12px;
-    color: rgba(255, 255, 255, 0.72);
-    text-decoration: none;
-    border-radius: var(--radius-md);
-    font-size: 15px;
-    font-weight: 400;
-    letter-spacing: 0.01em;
-    white-space: nowrap;
-    overflow: hidden;
-    transition:
-        background var(--transition),
-        color var(--transition),
-        transform var(--transition);
+    border-radius: var(--radius-sm);
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 13.5px;
+    font-weight: 500;
+    transition: background 0.15s ease, color 0.15s ease;
     position: relative;
 }
 
-/* Icon wrapper */
-.sidebar-menu a i {
-    width: 20px;
-    min-width: 20px;
-    font-size: 17px;
+.sidebar-menu > li > a i,
+.dropdown-menu a i {
+    font-size: 15px;
+    width: 19px;
     text-align: center;
-    color: rgba(255, 255, 255, 0.55);
-    transition: color var(--transition);
-    flex-shrink: 0;
+    color: rgba(255, 255, 255, 0.45);
+    transition: color 0.15s ease;
 }
 
-/* Span text */
-.sidebar-menu a span {
-    transition: opacity var(--transition), transform var(--transition);
-}
-
-/* Hover */
-.sidebar-menu a:hover {
-    background: rgba(255, 255, 255, 0.08);
+.sidebar-menu > li > a:hover,
+.dropdown-menu a:hover {
+    background: rgba(255, 255, 255, 0.06);
     color: #fff;
 }
 
-.sidebar-menu a:hover i {
-    color: rgba(255, 255, 255, 0.9);
+.sidebar-menu > li > a:hover i,
+.dropdown-menu a:hover i {
+    color: var(--blue-light);
 }
 
-/* Active */
-.sidebar-menu a.active {
-    background: var(--sidebar-active-bg);
-    color: var(--sidebar-active-txt);
-    font-weight: 600;
+.sidebar-menu > li > a.active,
+.dropdown-menu a.active {
+    background: rgba(0, 95, 213, 0.22);
+    color: #fff;
 }
 
-.sidebar-menu a.active i {
-    color: var(--navy-800);
-}
-
-/* Active left accent bar */
-.sidebar-menu a.active::before {
+.sidebar-menu > li > a.active::before,
+.dropdown-menu a.active::before {
     content: '';
     position: absolute;
-    left: 0;
-    top: 20%;
-    height: 60%;
+    left: -14px;
+    top: 50%;
+    transform: translateY(-50%);
     width: 3px;
-    background: var(--accent);
+    height: 20px;
     border-radius: 0 3px 3px 0;
+    background: var(--blue-light);
+    /* the "you are here" rail now glows the same way the
+       login page's active route dot does — same color,
+       same meaning, same visual weight */
+    box-shadow: var(--glow-blue);
 }
 
-/* Collapsed state */
-.main-sidebar.collapsed .sidebar-menu a {
-    gap: 0;
-    justify-content: center;
-    padding: 10px;
+.sidebar-menu > li > a.active i,
+.dropdown-menu a.active i {
+    color: var(--blue-light);
+    filter: drop-shadow(0 0 4px rgba(102, 149, 211, 0.6));
 }
 
-.main-sidebar.collapsed .sidebar-menu a span {
-    opacity: 0;
-    width: 0;
-    transform: translateX(-6px);
-    pointer-events: none;
-}
-
-.main-sidebar.collapsed .sidebar-menu a i {
-    font-size: 18px;
-}
-
-/* Tooltip on collapsed */
-.main-sidebar.collapsed .sidebar-menu a::after {
-    content: attr(data-label);
-    position: absolute;
-    left: calc(var(--sidebar-collapsed) + 8px);
-    background: var(--navy-900);
-    color: #fff;
-    font-size: 13px;
-    padding: 5px 10px;
+/* dropdown group header row (e.g. "Program Management") */
+.dropdown-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
     border-radius: var(--radius-sm);
-    white-space: nowrap;
-    opacity: 0;
-    pointer-events: none;
-    border: 1px solid rgba(255,255,255,0.1);
-    transition: opacity 0.15s ease;
-    z-index: 9999;
+    font-family: 'Oswald', sans-serif;
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
 }
 
-.main-sidebar.collapsed .sidebar-menu a:hover::after {
-    opacity: 1;
+.dropdown-toggle:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
 }
 
-/* =============================================
-   SIDEBAR FOOTER
-   ============================================= */
+.dropdown-toggle i {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.4);
+    transition: transform 0.2s ease, color 0.15s ease;
+}
+
+/* chevron flips and glows when its section is open, same
+   "active/live" visual language used elsewhere */
+.sidebar-dropdown.open .dropdown-toggle {
+    color: #fff;
+}
+
+.sidebar-dropdown.open .dropdown-toggle i {
+    transform: rotate(180deg);
+    color: var(--blue-light);
+}
+
+.dropdown-menu {
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 0 8px 10px;
+}
+
+.sidebar-dropdown.open .dropdown-menu {
+    display: flex;
+}
+
+/* sidebar footer / logout */
 .sidebar-footer {
-    padding: 10px 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    flex-shrink: 0;
+    padding: 16px 22px 22px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .logout-btn {
     display: flex;
     align-items: center;
-    gap: 13px;
-    padding: 10px 12px;
-    color: rgba(255, 255, 255, 0.65);
-    text-decoration: none;
-    border-radius: var(--radius-md);
-    font-size: 15px;
-    font-family: 'Oswald', sans-serif;
-    white-space: nowrap;
-    overflow: hidden;
-    transition:
-        background var(--transition),
-        color var(--transition);
-}
-
-.logout-btn i {
-    width: 20px;
-    min-width: 20px;
-    font-size: 17px;
-    text-align: center;
+    gap: 10px;
+    font-size: 12.5px;
+    font-weight: 500;
     color: rgba(255, 255, 255, 0.5);
-    flex-shrink: 0;
-    transition: color var(--transition);
-}
-
-.logout-btn span {
-    transition: opacity var(--transition), transform var(--transition);
+    transition: color 0.15s ease;
 }
 
 .logout-btn:hover {
-    background: rgba(220, 53, 69, 0.18);
-    color: #ff6b7a;
+    color: #fff;
 }
 
-.logout-btn:hover i {
-    color: #ff6b7a;
-}
-
-/* Collapsed */
-.main-sidebar.collapsed .logout-btn {
-    gap: 0;
-    justify-content: center;
-    padding: 10px;
-}
-
-.main-sidebar.collapsed .logout-btn span {
-    opacity: 0;
-    width: 0;
-    transform: translateX(-6px);
-    pointer-events: none;
-}
-
-/* =============================================
+/* ============================================================
    TOPBAR
-   ============================================= */
+   ============================================================ */
 .topbar {
     position: fixed;
     top: 0;
-    left: var(--sidebar-width);
+    left: var(--sidebar-w);
     right: 0;
-    height: var(--topbar-height);
-    background: #fff;
-    border-bottom: 1px solid var(--border-light);
+    height: var(--topbar-h);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 24px;
-    z-index: 1000;
-    transition: left var(--transition);
-    box-shadow: 0 1px 3px rgba(11, 35, 67, 0.06);
+    padding: 0 28px;
+    z-index: 30;
 }
 
-/* Topbar breadcrumb / title area */
 .topbar-left {
     display: flex;
     align-items: center;
@@ -390,336 +351,511 @@ body {
 }
 
 .topbar-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--text-primary);
-    letter-spacing: 0.02em;
+    font-family: 'Fraunces', serif;
+    font-optical-sizing: auto;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: 0.01em;
 }
 
-/* =============================================
-   USER AVATAR (TOPBAR)
-   ============================================= */
-.user {
+.topbar .user {
     display: flex;
     align-items: center;
-    gap: 10px;
-    color: var(--text-primary);
-    font-size: 14px;
+    gap: 8px;
+    font-size: 13.5px;
     font-weight: 500;
+    color: var(--text);
+    padding: 6px 12px 6px 6px;
+    border-radius: 999px;
+    transition: background 0.15s ease;
     cursor: pointer;
-    padding: 6px 10px;
-    border-radius: var(--radius-md);
-    transition: background var(--transition);
 }
 
-.user:hover {
-    background: #f0f4f9;
+.topbar .user:hover {
+    background: var(--bg);
 }
 
-.user .material-symbols-outlined {
-    font-size: 28px;
-    color: var(--navy-800);
+.topbar .user .material-symbols-outlined {
+    font-size: 26px;
+    color: var(--blue);
 }
 
-/* =============================================
-   MAIN CONTENT
-   ============================================= */
+/* ============================================================
+   MAIN CONTAINER
+   ============================================================ */
 .container {
-    margin-left: var(--sidebar-width);
-    margin-top: var(--topbar-height);
-    padding: 28px;
-    min-height: calc(100vh - var(--topbar-height));
-    transition: margin-left var(--transition);
+    margin-left: var(--sidebar-w);
+    margin-top: var(--topbar-h);
+    padding: 28px 32px 60px;
+    min-height: calc(100vh - var(--topbar-h));
 }
 
-.main-sidebar.collapsed ~ .container {
-    margin-left: var(--sidebar-collapsed);
-}
-
-/* =============================================
-   PAGE HEADER (optional utility)
-   ============================================= */
-.page-header {
+/* page heading block used at the top of each section */
+.page-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
     margin-bottom: 24px;
 }
 
-.page-header h1 {
-    font-size: 24px;
-    font-weight: 700;
-    color: var(--text-primary);
-    letter-spacing: 0.02em;
+.page-head .page-eyebrow {
+    font-family: 'Oswald', sans-serif;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
 }
 
-.page-header p {
-    font-size: 14px;
-    color: var(--text-muted);
+.page-head .page-title {
+    font-family: 'Fraunces', serif;
+    font-optical-sizing: auto;
+    font-size: 25px;
+    font-weight: 600;
+    color: var(--ink);
+}
+
+.page-head .page-sub {
+    font-size: 13px;
+    color: var(--text-soft);
     margin-top: 4px;
 }
 
-/* =============================================
-   STAT CARDS (optional utility)
-   ============================================= */
+/* ============================================================
+   STAT / SUMMARY CARDS
+   ============================================================ */
 .stat-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 18px;
     margin-bottom: 28px;
 }
 
 .stat-card {
-    background: #fff;
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    padding: 20px;
-    transition: box-shadow var(--transition), transform var(--transition);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    overflow: hidden;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .stat-card:hover {
-    box-shadow: 0 4px 16px rgba(11, 35, 67, 0.09);
+    box-shadow: var(--shadow-md);
     transform: translateY(-2px);
 }
 
-.stat-card .label {
-    font-size: 12px;
-    letter-spacing: 0.08em;
+/* the flat blue bar becomes the login page's top-line
+   gradient: fades in from nothing, brightens toward
+   blue-light, fades back out */
+.stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 3px;
+    height: 100%;
+    background: linear-gradient(180deg, rgba(102, 149, 211, 0) 0%, var(--blue) 30%, var(--blue-light) 65%, rgba(102, 149, 211, 0) 100%);
+}
+
+.stat-card .stat-label {
+    font-family: 'Oswald', sans-serif;
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--text-muted);
-    margin-bottom: 8px;
+    color: var(--text-soft);
+    margin-bottom: 10px;
 }
 
-.stat-card .value {
-    font-size: 28px;
-    font-weight: 700;
-    color: var(--navy-800);
+.stat-card .stat-value {
+    font-family: 'Fraunces', serif;
+    font-size: 30px;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1;
 }
 
-.stat-card .sub {
-    font-size: 13px;
-    color: var(--text-muted);
-    margin-top: 4px;
+.stat-card .stat-delta {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-top: 10px;
 }
 
-/* =============================================
-   CONTENT CARD (optional utility)
-   ============================================= */
-.card {
-    background: #fff;
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    padding: 24px;
+.stat-delta.up { color: var(--success); }
+.stat-delta.down { color: var(--danger); }
+
+/* ============================================================
+   PANELS / CARDS
+   ============================================================ */
+.panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
     margin-bottom: 24px;
+    overflow: hidden;
 }
 
-.card-title {
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--border);
+}
+
+.panel-header .panel-title {
+    font-family: 'Fraunces', serif;
     font-size: 16px;
     font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 16px;
+    color: var(--ink);
+}
+
+.panel-body {
+    padding: 22px;
+}
+
+/* ============================================================
+   TABLES
+   ============================================================ */
+.table-wrap {
+    overflow-x: auto;
+}
+
+table.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+}
+
+.data-table thead th {
+    text-align: left;
+    font-family: 'Oswald', sans-serif;
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+    background: var(--bg);
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.data-table tbody td {
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: middle;
+}
+
+.data-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.data-table tbody tr:hover {
+    background: #f8fafc;
+}
+
+.data-table .row-actions {
+    display: flex;
+    gap: 6px;
+}
+
+/* ============================================================
+   STATUS PILLS / BADGES
+   ============================================================ */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 11px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
     letter-spacing: 0.02em;
 }
 
-/* =============================================
-   SCROLLBAR (page-level)
-   ============================================= */
-::-webkit-scrollbar {
+.badge::before {
+    content: '';
     width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
 }
 
-::-webkit-scrollbar-track {
+.badge.success { background: var(--success-bg); color: var(--success); }
+.badge.warning { background: var(--warning-bg); color: var(--warning); }
+.badge.danger  { background: var(--danger-bg);  color: var(--danger); }
+.badge.info    { background: var(--info-bg);    color: var(--info); }
+.badge.neutral { background: var(--bg); color: var(--text-soft); }
+
+/* "live" status — mirrors the login page's pulsing route-node,
+   for records actively being processed right now */
+.badge.live {
+    background: var(--info-bg);
+    color: var(--blue);
+}
+
+.badge.live::before {
+    background: var(--blue-light);
+    animation: badge-pulse 2s ease-in-out infinite;
+}
+
+@keyframes badge-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(102, 149, 211, 0.55); }
+    70%  { box-shadow: 0 0 0 5px rgba(102, 149, 211, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(102, 149, 211, 0); }
+}
+
+/* ============================================================
+   BUTTONS
+   ============================================================ */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    font-family: 'Oswald', sans-serif;
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.btn .icon-svg,
+.btn .material-symbols-outlined {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+}
+
+.btn-primary {
+    background: var(--ink);
+    color: #fff;
+}
+
+.btn-primary:hover {
+    background: var(--blue);
+    transform: translateY(-1px);
+    /* same glow language as the login button gets from sitting
+       near blue-light accents — keeps primary actions feeling
+       consistent with the rest of the login/dashboard pair */
+    box-shadow: 0 6px 20px rgba(0, 95, 213, 0.28);
+}
+
+.btn-outline {
     background: transparent;
+    border-color: var(--border);
+    color: var(--text);
 }
 
-::-webkit-scrollbar-thumb {
-    background: rgba(11, 35, 67, 0.18);
-    border-radius: 10px;
+.btn-outline:hover {
+    border-color: var(--blue);
+    color: var(--blue);
 }
 
-::-webkit-scrollbar-thumb:hover {
-    background: rgba(11, 35, 67, 0.30);
+.btn-danger {
+    background: var(--danger-bg);
+    color: var(--danger);
 }
 
-/* ==========================
-TOPBAR IMPROVEMENT
-========================== */
-
-.topbar-title{
-color:rgb(0, 0, 0);
-font-size:24px;
-letter-spacing:1px;
+.btn-danger:hover {
+    background: var(--danger);
+    color: #fff;
 }
 
-.user{
-background:rgba(255,255,255,.15);
-padding:8px 15px;
-border-radius:30px;
-color:rgb(0, 0, 0);
+.btn-icon {
+    padding: 8px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-soft);
 }
 
-.user:hover{
-background:rgba(255,255,255,.25);
+.btn-icon:hover {
+    border-color: var(--blue);
+    color: var(--blue);
 }
 
-.user .material-symbols-outlined{
-color:rgb(0, 0, 0);
+.btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+    transform: none;
+    box-shadow: none;
 }
 
-/* ==========================
-CONTENT AREA
-========================== */
-.container{
-background:#f5f7fb;
+/* ============================================================
+   FORMS (mirrors login field styling exactly)
+   ============================================================ */
+.field {
+    margin-bottom: 18px;
 }
 
-/* ==========================
-CARDS
-========================== */
-.card{
-background:white;
-border:none;
-border-radius:20px;
-box-shadow:0 8px 25px rgba(0,0,0,.08);
-transition:.3s;
+.field label {
+    display: block;
+    font-family: 'Oswald', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 7px;
 }
 
-.card:hover{
-transform:translateY(-5px);
+.field input,
+.field select,
+.field textarea {
+    width: 100%;
+    padding: 11px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 13.5px;
+    font-family: 'Inter', sans-serif;
+    color: var(--text);
+    background: #f8fafc;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
 
-/* ==========================
-STATISTICS CARDS
-========================== */
-.stat-card{
-background:linear-gradient(135deg,#ffffff,#f8fbff);
-border:none;
-border-radius:20px;
-box-shadow:0 10px 25px rgba(0,0,0,.08);
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+    border-color: var(--blue);
+    background: #fff;
+    /* identical focus ring to the login page's inputs */
+    box-shadow: var(--glow-blue-soft);
 }
 
-.stat-card .value{
-color:#1E4D8C;
-font-size:35px;
+.field input::placeholder,
+.field textarea::placeholder {
+    color: var(--text-faint);
 }
 
-.stat-card:hover{
-transform:translateY(-8px);
+.field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
 }
 
-/* ==========================
-TABLE DESIGN
-========================== */
-table{
-width:100%;
-border-collapse:collapse;
-background:white;
-border-radius:15px;
-overflow:hidden;
-box-shadow:0 5px 15px rgba(0,0,0,.05);
+/* ============================================================
+   ALERTS
+   ============================================================ */
+.alert {
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    margin-bottom: 18px;
+    border-left: 3px solid transparent;
 }
 
-th{
-background:#0B2343;
-color:white;
-padding:15px;
+.alert.error   { background: var(--danger-bg);  color: var(--danger);  border-color: var(--danger); }
+.alert.success { background: var(--success-bg); color: var(--success); border-color: var(--success); }
+.alert.warning { background: var(--warning-bg); color: var(--warning); border-color: var(--warning); }
+.alert.info    { background: var(--info-bg);    color: var(--info);    border-color: var(--info); }
+
+/* ============================================================
+   EMPTY STATE
+   ============================================================ */
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-soft);
 }
 
-td{
-padding:15px;
-border-bottom:1px solid #eee;
+.empty-state .material-symbols-outlined {
+    font-size: 40px;
+    color: var(--text-faint);
+    margin-bottom: 12px;
 }
 
-tr:hover{
-    background:#f8fafc;
+.empty-state h3 {
+    font-family: 'Fraunces', serif;
+    font-size: 16px;
+    color: var(--ink);
+    margin-bottom: 6px;
 }
 
-/* ==========================
-BUTTONS
-========================== */
-.btn{
-background:#1E4D8C;
-color:white;
-border:none;
-padding:10px 20px;
-border-radius:10px;
-cursor:pointer;
-transition:.3s;
+.empty-state p {
+    font-size: 13px;
 }
 
-.btn:hover{
-background:#0B2343;
-transform:translateY(-2px);
+/* ============================================================
+   PAGINATION
+   ============================================================ */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    padding: 16px 22px;
+    border-top: 1px solid var(--border);
 }
 
-/* ==========================
-PAGE HEADER
-========================== */
-.page-header h1{
-font-size:32px;
-color:#0B2343;
+.pagination button {
+    min-width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-soft);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
 }
 
-.page-header p{
-color:#7a8799;
+.pagination button.active {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: #fff;
 }
 
-.sidebar-dropdown{
-    width:100%;
+.pagination button:hover:not(.active) {
+    border-color: var(--blue);
+    color: var(--blue);
 }
 
-.sidebar-dropdown .dropdown-menu{
-    max-height:0;
-    overflow:hidden;
-    transition:max-height .3s ease;
-    background:rgba(255,255,255,.03);
-    border-radius:8px;
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 1024px) {
+    :root {
+        --sidebar-w: 220px;
+    }
 }
 
-.sidebar-dropdown.open .dropdown-menu{
-    max-height:500px;
-}
+@media (max-width: 860px) {
+    .main-sidebar {
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+    }
 
-.sidebar-dropdown .dropdown-menu a{
-    display:flex;
-    align-items:center;
-    gap:10px;
-    padding:10px 12px 10px 45px;
-    color:rgba(255,255,255,.65);
-    text-decoration:none;
-    transition:.3s;
-}
+    .main-sidebar.open {
+        transform: translateX(0);
+    }
 
-.sidebar-dropdown .dropdown-menu a:hover{
-    background:rgba(255,255,255,.08);
-    color:#fff;
-}
+    .topbar,
+    .container {
+        left: 0;
+        margin-left: 0;
+    }
 
-.dropdown-toggle{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    padding:10px 12px;
-    cursor:pointer;
-    color:rgba(255,255,255,.72);
-    border-radius:10px;
-    transition:.3s;
-}
-
-.dropdown-toggle span{
-    display:flex;
-    align-items:center;
-    gap:13px;
-}
-
-.dropdown-menu a{
-    display:flex;
-    align-items:center;
-    gap:10px;
-    padding:10px 16px 10px 40px;
-}
-
-.sidebar-dropdown.open .fa-chevron-down{
-    transform:rotate(180deg);
-}
-
-.fa-chevron-down{
-    transition:transform .3s ease;
+    .field-row {
+        grid-template-columns: 1fr;
+    }
 }
