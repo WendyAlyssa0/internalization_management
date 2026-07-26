@@ -98,7 +98,6 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <table>
             <thead>
                 <tr>
-                    <th>ID</th>
                     <th>Program Name</th>
                     <th>Type</th>
                     <th>Country</th>
@@ -113,7 +112,6 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <?php foreach ($programs as $p): ?>
                 <tr data-name="<?= strtolower(h($p['program_name'])) ?>">
 
-                    <td>#<?= h($p['id']) ?></td>
                     <td><?= h($p['program_name']) ?></td>
                     <td><?= h($p['program_type']) ?></td>
                     <td><?= h($p['country_name']) ?></td>

@@ -263,7 +263,6 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <table>
             <thead>
                 <tr>
-                    <th>ID</th>
                     <th>Name</th>
                     <th>Role</th>
                     <th>Status</th>
@@ -285,7 +284,6 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <tr data-name="<?= h(strtolower($fullname)) ?>"
                         data-role="<?= h($role) ?>">
 
-                        <td>#<?= h($u['id']) ?></td>
                         <td><?= h($fullname) ?></td>
                         <td>
                             <span class="badge"><?= h(ucwords($u['user_role'])) ?></span>

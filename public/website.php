@@ -1,64 +1,59 @@
 <?php
+require_once __DIR__ . '/../config/db.php';
 
-$programs = [
+$pdo = db();
 
-[
-    'id' => 1,
-    'emoji' => '🇯🇵',
-    'title' => 'JENESYS Student Exchange Program',
-    'institution' => 'Japan International Cooperation Center (JICE)',
-    'country' => 'Japan',
-    'type' => 'exchange',
-    'duration' => '2 weeks',
-    'deadline' => 'Jul 15, 2025',
-    'urgent' => true,
-    'funding' => 'Full Scholarship',
-    'featured' => true,
-    'slots' => 5,
-    'desc' => 'A two-week cultural and academic exchange program in Japan.',
-],
+$programs = [];
+$loadError = null;
 
-[
-    'id' => 2,
-    'emoji' => '🇰🇷',
-    'title' => 'Korea-ASEAN IT Internship',
-    'institution' => 'Seoul National University of Science & Technology',
-    'country' => 'South Korea',
-    'type' => 'internship',
-    'duration' => '4 months',
-    'deadline' => 'Aug 1, 2025',
-    'urgent' => false,
-    'funding' => 'Partial Scholarship',
-    'featured' => true,
-    'slots' => 3,
-    'desc' => 'Hands-on IT internship embedded within university research labs in Seoul.',
-],
+try {
+$stmt = $pdo->prepare("
+    SELECT
+        p.id,
+        p.program_name,
+        p.program_type,
+        p.description,
+        p.start_date,
+        p.end_date,
+        p.status,
+        p.partner_id,
+        p.country_id,
+        c.country_name,
+        pr.institution_name
+    FROM programs p
+    LEFT JOIN countries c
+        ON p.country_id = c.id
+    LEFT JOIN partners pr
+        ON p.partner_id = pr.id
+    WHERE p.status = 'Active'
+    ORDER BY p.id DESC
+    ");
 
-];
+    $stmt->execute();
 
+    $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+} catch (PDOException $ex) {
+    // Don't let a query failure blank out the whole page — show a
+    // friendly message instead and log the real error for debugging.
+    error_log('browse_program.php query failed: ' . $ex->getMessage());
+    $loadError = 'We ran into a problem loading programs. Please try again shortly.';
+}
 
-$search  = $_GET['search'] ?? '';
-$type    = $_GET['type'] ?? '';
-$country = $_GET['country'] ?? '';
-
-$filteredPrograms = array_filter($programs, function($p) use ($search,$type,$country){
-
-    $matchSearch =
-        empty($search) ||
-        stripos($p['title'],$search) !== false ||
-        stripos($p['country'],$search) !== false ||
-        stripos($p['institution'],$search) !== false;
-
-    $matchType =
-        empty($type) ||
-        $p['type'] === $type;
-
-    $matchCountry =
-        empty($country) ||
-        $p['country'] === $country;
-
-    return $matchSearch && $matchType && $matchCountry;
-});
+// Counts for the sidebar / hero stats (computed from real data instead of hardcoded numbers)
+$typeCounts = ['exchange' => 0, 'internship' => 0, 'research' => 0, 'training' => 0];
+$countrySet = [];
+foreach ($programs as $p) {
+    $t = strtolower($p['program_type'] ?? '');
+    if (isset($typeCounts[$t])) {
+        $typeCounts[$t]++;
+    }
+    if (!empty($p['country_name'])) {
+        $countrySet[$p['country_name']] = true;
+    }
+}
+$totalPrograms = count($programs);
+$totalCountries = count($countrySet);
 ?>
 
 <!DOCTYPE html>
@@ -67,7 +62,7 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>PSU Internalization — Student Programs Portal</title>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../asset/css/website.css">
 
 </head>
@@ -77,10 +72,10 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
 <nav>
   <div class="nav-logo">PSU <span>Internalization</span></div>
   <ul class="nav-links">
-    <li><a href="#">Browse Programs</a></li>
-    <li><a href="#">Partner Institutions</a></li>
-    <li><a href="#">How It Works</a></li>
-    <li><a href="#" class="nav-cta">Apply Now</a></li>
+    <li><a href="browse_program.php">Browse Programs</a></li>
+    <li><a href="partner_ins.php">Partner Institutions</a></li>
+    <li><a href="how_it_works.php">How It Works</a></li>
+    <li><a href="register.php" class="nav-cta">Log in Now</a></li>
   </ul>
 </nav>
 
@@ -88,7 +83,7 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
 <section class="hero">
   <div class="hero-inner">
     <div class="hero-eyebrow">Student Mobility &amp; Internship Portal</div>
-    <h1>Explore programs <em>beyond</em> the campus.</h1>
+    <h1>Find your next program, <em>abroad</em>.</h1>
     <p>Discover internships, exchange programs, and research opportunities from partner institutions around the world — open to PSU students.</p>
     <div class="search-bar">
       <input type="text" placeholder="Search by program name, country, or field…" id="searchInput"/>
@@ -99,11 +94,11 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
         <option value="research">Research</option>
         <option value="training">Training</option>
       </select>
-      <button onclick="applySearch()">Search</button>
+      <button onclick="applySearch()">Search Programs</button>
     </div>
     <div class="stats-strip">
-      <div class="stat"><strong>42</strong> Active Programs</div>
-      <div class="stat"><strong>41</strong> Partner Countries</div>
+      <div class="stat"><strong><?= $totalPrograms ?></strong> Active Programs</div>
+      <div class="stat"><strong><?= $totalCountries ?></strong> Partner Countries</div>
       <div class="stat"><strong>130+</strong> Students Placed</div>
     </div>
   </div>
@@ -117,10 +112,10 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
     <div class="filter-card">
       <h3>Program Type</h3>
       <div class="filter-group">
-        <label><input type="checkbox" data-filter="type" value="exchange" onchange="filterCards()"> Student Exchange <span class="badge-count">14</span></label>
-        <label><input type="checkbox" data-filter="type" value="internship" onchange="filterCards()"> Internship <span class="badge-count">18</span></label>
-        <label><input type="checkbox" data-filter="type" value="research" onchange="filterCards()"> Research <span class="badge-count">6</span></label>
-        <label><input type="checkbox" data-filter="type" value="training" onchange="filterCards()"> Training <span class="badge-count">4</span></label>
+        <label><input type="checkbox" data-filter="type" value="exchange" onchange="filterCards()"> Student Exchange <span class="badge-count"><?= $typeCounts['exchange'] ?></span></label>
+        <label><input type="checkbox" data-filter="type" value="internship" onchange="filterCards()"> Internship <span class="badge-count"><?= $typeCounts['internship'] ?></span></label>
+        <label><input type="checkbox" data-filter="type" value="research" onchange="filterCards()"> Research <span class="badge-count"><?= $typeCounts['research'] ?></span></label>
+        <label><input type="checkbox" data-filter="type" value="training" onchange="filterCards()"> Training <span class="badge-count"><?= $typeCounts['training'] ?></span></label>
       </div>
     </div>
 
@@ -128,48 +123,9 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
       <h3>Country / Region</h3>
       <select id="countryFilter" onchange="filterCards()">
         <option value="">All Countries</option>
-        <option>Japan</option>
-        <option>South Korea</option>
-        <option>Germany</option>
-        <option>Australia</option>
-        <option>Malaysia</option>
-        <option>Singapore</option>
-        <option>United States</option>
-        <option>China</option>
-        <option>France</option>
-        <option>New Zealand</option>
-        <option>Thailand</option>
-        <option>India</option>
-        <option>Taiwan</option>
-        <option>Vietnam</option>
-        <option>Indonesia</option>
-        <option>Switzerland</option>
-        <option>Brazil</option>
-        <option>United Kingdom</option>
-        <option>Russia</option>
-        <option>Canada</option>
-        <option>Portugal</option>
-        <option>Mexico</option>
-        <option>South Africa</option>
-        <option>UAE</option>
-        <option>Netherlands</option>
-        <option>Chile</option>
-        <option>Sweden</option>
-        <option>Italy</option>
-        <option>Finland</option>
-        <option>Poland</option>
-        <option>Austria</option>
-        <option>Norway</option>
-        <option>Greece</option>
-        <option>Israel</option>
-        <option>Hungary</option>
-        <option>Peru</option>
-        <option>Belgium</option>
-        <option>Romania</option>
-        <option>Czech Republic</option>
-        <option>Ireland</option>
-        <option>Denmark</option>
-        <option>Philippines</option>
+        <?php foreach (array_keys($countrySet) as $countryName): ?>
+          <option><?= htmlspecialchars($countryName) ?></option>
+        <?php endforeach; ?>
       </select>
     </div>
 
@@ -200,7 +156,7 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
     <div class="listings-header">
       <div>
         <h2>Available Programs</h2>
-        <span id="resultCount">Showing 6 of 42 programs</span>
+        <span id="resultCount">Showing <?= $totalPrograms ?> of <?= $totalPrograms ?> programs</span>
       </div>
       <select class="sort-select" id="sortSelect">
         <option value="deadline">Sort: Deadline (Soonest)</option>
@@ -209,79 +165,26 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
       </select>
     </div>
 
-    <div id="programList">
+    <?php if ($loadError): ?>
 
-<?php foreach($programs as $p): ?>
+      <div class="programs-empty">
+        <p><?= htmlspecialchars($loadError) ?></p>
+      </div>
 
-<div class="program-card <?= $p['featured'] ? 'featured' : '' ?>">
+    <?php elseif ($totalPrograms === 0): ?>
 
-    <div class="card-logo">
-        <?= $p['emoji'] ?>
-    </div>
+      <div class="programs-empty">
+        <p>No programs are available right now. Please check back soon.</p>
+      </div>
 
-    <div class="card-body">
+    <?php else: ?>
 
-        <div class="card-top">
+      <!-- Cards are rendered client-side by renderPrograms() below -->
+      <div id="programList"></div>
 
-            <div>
-                <div class="card-title">
-                    <?= htmlspecialchars($p['title']) ?>
-                </div>
+      <div class="pagination" id="paginationBar"></div>
 
-                <div class="card-institution">
-                    <?= htmlspecialchars($p['institution']) ?>
-                    ·
-                    <?= htmlspecialchars($p['country']) ?>
-                </div>
-            </div>
-
-            <div style="text-align:right;">
-
-                <?php if($p['featured']): ?>
-                    <span class="featured-badge">
-                        FEATURED
-                    </span>
-                <?php endif; ?>
-
-                <div class="card-deadline <?= $p['urgent'] ? 'urgent' : '' ?>">
-                    Deadline: <?= $p['deadline'] ?>
-                </div>
-
-            </div>
-
-        </div>
-
-        <div class="card-desc">
-            <?= substr($p['desc'],0,120) ?>...
-        </div>
-
-        <div class="card-tags">
-            <span class="tag type-<?= $p['type'] ?>">
-                <?= ucfirst($p['type']) ?>
-            </span>
-
-            <span class="tag">
-                ⏱ <?= $p['duration'] ?>
-            </span>
-
-            <span class="tag">
-                🎓 <?= $p['funding'] ?>
-            </span>
-
-            <span class="tag">
-                👥 <?= $p['slots'] ?> Slots
-            </span>
-        </div>
-
-    </div>
-
-</div>
-
-<?php endforeach; ?>
-
-</div>
-
-    <div class="pagination" id="paginationBar"></div>
+    <?php endif; ?>
   </main>
 </div>
 
@@ -310,7 +213,7 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
         <h4>Requirements</h4>
         <ul class="requirements-list" id="modalReqs"></ul>
       </div>
-      <button class="apply-btn">Apply for this Program</button>
+      <a href="#" id="applyLink" class="apply-btn">Apply for this Program</a>
     </div>
   </div>
 </div>
@@ -321,7 +224,68 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
   Pangasinan State University · Office of International Affairs · <a href="#" style="color:rgba(255,255,255,.55)">Contact Us</a>
 </footer>
 
+<?php if (!$loadError && $totalPrograms > 0): ?>
 <script>
+
+  // ---- Raw data from the database ----
+  const rawPrograms = <?= json_encode($programs, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+
+  const TYPE_EMOJI = {
+    exchange: '🔄',
+    internship: '💼',
+    research: '🔬'
+  };
+
+  function formatDate(dateStr) {
+    if (!dateStr) return 'TBA';
+    const d = new Date(dateStr);
+    if (isNaN(d)) return 'TBA';
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function computeDuration(start, end) {
+    if (!start || !end) return 'Flexible';
+    const s = new Date(start), e = new Date(end);
+    if (isNaN(s) || isNaN(e)) return 'Flexible';
+    const months = Math.max(1, Math.round((e - s) / (1000 * 60 * 60 * 24 * 30)));
+    if (months >= 10) return '1 academic year';
+    if (months >= 5) return '1 semester';
+    if (months >= 4) return '4 – 6 months';
+    return '1 – 3 months';
+  }
+
+  function isUrgent(endDate) {
+    if (!endDate) return false;
+    const days = (new Date(endDate) - new Date()) / (1000 * 60 * 60 * 24);
+    return days >= 0 && days <= 14;
+  }
+
+  // ---- Normalize DB rows into the shape the UI expects ----
+const programs = rawPrograms.map(p => {
+
+    const type = (p.program_type || '').toLowerCase();
+
+    return {
+        id: p.id,
+        title: p.program_name,
+        type: type,
+        desc: p.description || 'No description available.',
+        institution: p.institution_name || 'Partner Institution',
+        country: p.country_name || 'Unknown',
+
+        startDate: p.start_date,
+        endDate: p.end_date,
+
+        deadline: formatDate(p.end_date),
+        duration: computeDuration(p.start_date, p.end_date),
+
+        emoji: TYPE_EMOJI[type] || '🎓',
+
+        featured: false,
+        urgent: isUrgent(p.end_date)
+    };
+
+});
 
   const PER_PAGE = 8;
   let currentPage = 1;
@@ -331,7 +295,7 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
     currentPage = page || 1;
     filteredPrograms = list;
     const total = list.length;
-    const totalPages = Math.ceil(total / PER_PAGE);
+    const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
     const start = (currentPage - 1) * PER_PAGE;
     const pageItems = list.slice(start, start + PER_PAGE);
 
@@ -339,38 +303,58 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
     container.innerHTML = '';
 
     if (total === 0) {
-      container.innerHTML = '<div style="text-align:center;padding:60px 0;color:var(--gray500);">No programs match your filters. Try adjusting your search.</div>';
+      container.innerHTML = '<div style="text-align:center;padding:60px 0;color:var(--gray-500);">No programs match your filters. Try adjusting your search.</div>';
       renderPagination(0, 1);
       document.getElementById('resultCount').textContent = 'No programs found';
       return;
     }
 
     pageItems.forEach(p => {
-      const card = document.createElement('div');
-      card.className = 'program-card' + (p.featured ? ' featured' : '');
-      card.onclick = () => openModal(p);
-      card.innerHTML = `
-        <div class="card-logo">${p.emoji}</div>
-        <div class="card-body">
-          <div class="card-top">
-            <div>
-              <div class="card-title">${p.title}</div>
-              <div class="card-institution">${p.institution} · ${p.country}</div>
+
+        const desc =
+            p.desc.length > 120
+                ? p.desc.substring(0, 120) + "..."
+                : p.desc;
+
+        const card = document.createElement('div');
+        card.className = 'program-card' + (p.featured ? ' featured' : '');
+        card.onclick = () => openModal(p);
+
+        card.innerHTML = `
+            <div class="card-logo">${p.emoji}</div>
+
+            <div class="card-body">
+
+                <div class="card-top">
+                    <div>
+                        <div class="card-title">${p.title}</div>
+                        <div class="card-institution">${p.institution} · ${p.country}</div>
+                    </div>
+
+                    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
+                        ${p.featured ? '<span class="featured-badge">FEATURED</span>' : ''}
+                        <span class="card-deadline${p.urgent ? ' urgent' : ''}">
+                            Deadline: ${p.deadline}
+                        </span>
+                    </div>
+                </div>
+
+                <div class="card-desc">${desc}</div>
+
+                    <div class="card-tags">
+                        <span class="tag type-${p.type}">
+                            ${capitalize(p.type)}
+                        </span>
+
+                        <span class="tag">
+                            ⏱ ${p.duration}
+                        </span>
+                    </div>
+
             </div>
-            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
-              ${p.featured ? '<span class="featured-badge">FEATURED</span>' : ''}
-              <span class="card-deadline${p.urgent ? ' urgent' : ''}">Deadline: ${p.deadline}</span>
-            </div>
-          </div>
-          <div class="card-desc">${p.desc.substring(0,120)}…</div>
-          <div class="card-tags">
-            <span class="tag type-${p.type}">${capitalize(p.type)}</span>
-            <span class="tag">⏱ ${p.duration}</span>
-            <span class="tag">🎓 ${p.funding}</span>
-            <span class="tag">👥 ${p.slots} slot${p.slots > 1 ? 's' : ''} available</span>
-          </div>
-        </div>`;
-      container.appendChild(card);
+        `;
+
+        container.appendChild(card);
     });
 
     document.getElementById('resultCount').textContent =
@@ -411,7 +395,7 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
       if (p === '…') {
         const s = document.createElement('span');
         s.textContent = '…';
-        s.style.cssText = 'padding:0 6px;color:var(--gray500);line-height:36px;';
+        s.style.cssText = 'padding:0 6px;color:var(--gray-500);line-height:36px;';
         pg.appendChild(s);
       } else {
         pg.appendChild(btn(p, p, false, p === active));
@@ -427,14 +411,14 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
     document.getElementById('modalInstitution').textContent = p.institution + ' · ' + p.country;
     document.getElementById('modalTags').innerHTML = `
       <span class="tag type-${p.type}">${capitalize(p.type)}</span>
-      <span class="tag">🎓 ${p.funding}</span>`;
+      <span class="tag">⏱ ${p.duration}</span>`;
     document.getElementById('modalDesc').textContent = p.desc;
     document.getElementById('modalMeta').innerHTML = `
       <div class="meta-item"><div class="label">Duration</div><div class="value">${p.duration}</div></div>
-      <div class="meta-item"><div class="label">Slots Available</div><div class="value">${p.slots} student${p.slots>1?'s':''}</div></div>
       <div class="meta-item"><div class="label">Application Deadline</div><div class="value">${p.deadline}</div></div>
-      <div class="meta-item"><div class="label">Funding</div><div class="value">${p.funding}</div></div>`;
-    document.getElementById('modalReqs').innerHTML = p.requirements.map(r => `<li>${r}</li>`).join('');
+      <div class="meta-item"><div class="label">Country</div><div class="value">${p.country}</div></div>`;
+    // Wire the Apply button to the real application flow for this program
+    document.getElementById('applyLink').href = '?page=apply_program&program_id=' + p.id;
     document.getElementById('modalOverlay').classList.add('open');
   }
 
@@ -449,15 +433,13 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
     const q = document.getElementById('searchInput').value.toLowerCase();
     const type = document.getElementById('typeFilter').value;
     const checkedTypes = [...document.querySelectorAll('.filter-group input[type=checkbox][data-filter=type]:checked')].map(c => c.value);
-    const checkedFunding = [...document.querySelectorAll('.filter-group input[type=checkbox][data-filter=funding]:checked')].map(c => c.value);
     const countryVal = document.getElementById('countryFilter').value;
 
     const filtered = programs.filter(p => {
       const matchQ = !q || p.title.toLowerCase().includes(q) || p.country.toLowerCase().includes(q) || p.institution.toLowerCase().includes(q);
       const matchType = (!type || p.type === type) && (checkedTypes.length === 0 || checkedTypes.includes(p.type));
       const matchCountry = !countryVal || p.country === countryVal;
-      const matchFunding = checkedFunding.length === 0 || checkedFunding.some(f => p.funding.toLowerCase().includes(f));
-      return matchQ && matchType && matchCountry && matchFunding;
+      return matchQ && matchType && matchCountry;
     });
     renderPrograms(filtered, 1);
   }
@@ -472,7 +454,7 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
     renderPrograms(programs, 1);
   }
 
-  function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+  function capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
 
   document.getElementById('searchInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') applySearch();
@@ -482,13 +464,17 @@ $filteredPrograms = array_filter($programs, function($p) use ($search,$type,$cou
   document.getElementById('sortSelect').addEventListener('change', function() {
     const val = this.value;
     const sorted = [...filteredPrograms];
-    if (val === 'deadline') sorted.sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
-    else if (val === 'slots') sorted.sort((a, b) => b.slots - a.slots);
-    else if (val === 'az') sorted.sort((a, b) => a.title.localeCompare(b.title));
+    sorted.sort((a, b) => {
+      const da = a.endDate ? new Date(a.endDate) : new Date(8640000000000000);
+      const db = b.endDate ? new Date(b.endDate) : new Date(8640000000000000);
+      return da - db;
+    });
+    if (val === 'az') sorted.sort((a, b) => a.title.localeCompare(b.title));
     renderPrograms(sorted, 1);
   });
 
   renderPrograms(programs, 1);
 </script>
+<?php endif; ?>
 </body>
 </html>

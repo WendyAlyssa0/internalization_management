@@ -80,11 +80,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
    FETCH PARTNERS
 ========================= */
 $partners = $pdo->query("
-    SELECT id, institution_name, country,
-           contact_first_name, contact_mi, contact_last_name,
-           agreement_type, expiry_date, status
-    FROM partners
-    ORDER BY id DESC
+SELECT
+    p.id,
+    p.institution_name,
+    c.country_name,
+    p.contact_first_name,
+    p.contact_middle_name,
+    p.contact_last_name,
+    p.contact_email,
+    a.agreement_name,
+    p.expiry_date,
+    p.status
+FROM partners p
+LEFT JOIN countries c
+    ON p.country_id = c.id
+LEFT JOIN agreement_types a
+    ON p.agreement_type_id = a.id
+ORDER BY p.id DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
@@ -113,7 +125,6 @@ $partners = $pdo->query("
         <table>
             <thead>
                 <tr>
-                    <th>ID</th>
                     <th>Institution</th>
                     <th>Country</th>
                     <th>Contact Person</th>
@@ -128,22 +139,21 @@ $partners = $pdo->query("
                 <?php foreach ($partners as $partner):
                     $contactName = formatContactName(
                         $partner['contact_first_name'] ?? '',
-                        $partner['contact_mi'] ?? '',
+                        $partner['contact_middle_name'] ?? '',
                         $partner['contact_last_name'] ?? ''
                     );
                     $searchData = strtolower(
                         $partner['institution_name'] . ' ' .
-                        $partner['country'] . ' ' .
+                        $partner['country_name'] . ' ' .
                         $contactName
                     );
                     $status = strtolower($partner['status'] ?? 'active');
                 ?>
                 <tr data-name="<?= h($searchData) ?>">
-                    <td>#<?= h($partner['id']) ?></td>
                     <td><?= h($partner['institution_name']) ?></td>
-                    <td><?= h($partner['country']) ?></td>
+                    <td><?= h($partner['country_name']) ?></td>
                     <td><?= h($contactName) ?></td>
-                    <td><?= h($partner['agreement_type'] ?: 'N/A') ?></td>
+                    <td><?= h($partner['agreement_name'] ?: 'N/A') ?></td>
                     <td>
                         <?= !empty($partner['expiry_date'])
                             ? date('M d, Y', strtotime($partner['expiry_date']))

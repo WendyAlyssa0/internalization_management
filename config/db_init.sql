@@ -1,17 +1,20 @@
-CREATE DATABASE internalization_management;
+CREATE DATABASE If NOT EXISTS internalization_management;
+USE internalization_management;
 
 CREATE TABLE users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     first_name VARCHAR(100) NOT NULL,
     middle_name VARCHAR(100) DEFAULT NULL,
     last_name VARCHAR(100) NOT NULL,
-    extension_name VARCHAR(50) DEFAULT NULL,
+    suffix VARCHAR(20) DEFAULT NULL,
+    student_id_number VARCHAR(30) DEFAULT NULL,
     birthdate DATE DEFAULT NULL,
+    sex ENUM('Male', 'Female', 'Prefer not to say') DEFAULT NULL,
     program VARCHAR(150) DEFAULT NULL,
-    email VARCHAR(150) UNIQUE NOT NULL,
+    email VARCHAR(150) NOT NULL UNIQUE,
     contact VARCHAR(20) DEFAULT NULL,
-    user_role ENUM('admin','user','applicant') DEFAULT 'applicant',
-    status ENUM('active','inactive') DEFAULT 'active',
+    user_role ENUM('super admin', 'admin', 'applicant') DEFAULT 'applicant',
+    status ENUM('active', 'inactive') DEFAULT 'active',
     password_hash VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -135,11 +138,15 @@ CREATE TABLE program_requirements (
         ON DELETE CASCADE
 );
 ALTER TABLE program_requirements
-ADD form_id INT NULL,
-ADD FOREIGN KEY (form_id) REFERENCES forms(id);
+ADD COLUMN form_id INT NULL,
+ADD CONSTRAINT fk_program_requirements_form
+    FOREIGN KEY (form_id)
+    REFERENCES forms(id)
+    ON DELETE SET NULL
+    ON UPDATE CASCADE;
 
 ALTER TABLE program_requirements
-ADD requirement_file VARCHAR(255) NULL;
+ADD COLUMN requirement_file VARCHAR(255) NULL;
 
 CREATE TABLE applications (
     id INT AUTO_INCREMENT PRIMARY KEY,
