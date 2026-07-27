@@ -1,0 +1,248 @@
+/* ==========================================================
+   Approved Students
+========================================================== */
+
+:root{
+    --primary:#0E1C36;
+    --primary-light:#1E3A5F;
+    --accent:#C9A227;
+    --bg:#f5f7fb;
+    --card:#ffffff;
+    --border:#e5e7eb;
+    --text:#1f2937;
+    --muted:#6b7280;
+    --shadow:0 8px 24px rgba(0,0,0,.08);
+
+    --success:#15803d;
+    --success-bg:#dcfce7;
+
+    --radius:14px;
+}
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    font-family:"DM Sans",sans-serif;
+    background:var(--bg);
+    color:var(--text);
+}
+
+/* ==========================================
+   CONTENT
+========================================== */
+
+.content{
+    display:flex;
+    flex-direction:column;
+    gap:24px;
+}
+
+/* ==========================================
+   PAGE HEADER
+========================================== */
+
+.page-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    flex-wrap:wrap;
+    gap:10px;
+}
+
+.page-header h2{
+    font-size:30px;
+    font-weight:700;
+    color:var(--primary);
+}
+
+.page-header p{
+    color:var(--muted);
+    margin-top:6px;
+}
+
+/* ==========================================
+   TOOLBAR
+========================================== */
+
+.toolbar{
+    display:flex;
+    justify-content:flex-end;
+}
+
+.search-wrap{
+    position:relative;
+    width:320px;
+}
+
+.search-wrap i{
+    position:absolute;
+    left:15px;
+    top:50%;
+    transform:translateY(-50%);
+    color:#94a3b8;
+}
+
+.search-wrap input{
+    width:100%;
+    padding:12px 16px 12px 42px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    outline:none;
+    background:#fff;
+    transition:.25s;
+    font-size:15px;
+}
+
+.search-wrap input:focus{
+    border-color:var(--primary-light);
+    box-shadow:0 0 0 3px rgba(30,58,95,.15);
+}
+
+/* ==========================================
+   TABLE CARD
+========================================== */
+
+.table-card{
+    background:var(--card);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    overflow:hidden;
+}
+
+/* ==========================================
+   TABLE
+========================================== */
+
+table{
+    width:100%;
+    border-collapse:collapse;
+    min-width:1100px;
+}
+
+thead{
+    background:var(--primary);
+}
+
+thead th{
+    color:#fff;
+    padding:16px;
+    text-align:left;
+    font-size:14px;
+    font-weight:600;
+    letter-spacing:.4px;
+}
+
+tbody td{
+    padding:16px;
+    border-bottom:1px solid var(--border);
+    font-size:15px;
+    vertical-align:middle;
+}
+
+tbody tr{
+    transition:.25s;
+}
+
+tbody tr:hover{
+    background:#f8fafc;
+}
+
+/* ==========================================
+   STATUS BADGE
+========================================== */
+
+.status-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:6px 14px;
+    border-radius:999px;
+    font-size:13px;
+    font-weight:600;
+}
+
+.status-approved{
+    background:var(--success-bg);
+    color:var(--success);
+}
+
+/* ==========================================
+   EMPTY ROW
+========================================== */
+
+.empty-row{
+    text-align:center;
+    color:var(--muted);
+    padding:40px;
+    font-style:italic;
+}
+
+/* ==========================================
+   PAGINATION / FOOTER
+========================================== */
+
+.pagination{
+    padding:18px 24px;
+    background:#fafafa;
+    border-top:1px solid var(--border);
+    color:var(--muted);
+    font-size:14px;
+    font-weight:500;
+}
+
+/* ==========================================
+   STUDENT CELL
+========================================== */
+
+tbody td:first-child{
+    font-weight:600;
+    color:var(--primary);
+}
+
+/* ==========================================
+   RESPONSIVE
+========================================== */
+
+@media (max-width:992px){
+
+    .table-card{
+        overflow-x:auto;
+    }
+
+    table{
+        min-width:1100px;
+    }
+}
+
+@media (max-width:768px){
+
+    .page-header{
+        flex-direction:column;
+        align-items:flex-start;
+    }
+
+    .toolbar{
+        justify-content:stretch;
+    }
+
+    .search-wrap{
+        width:100%;
+    }
+
+    .page-header h2{
+        font-size:26px;
+    }
+
+    thead th,
+    tbody td{
+        padding:14px;
+    }
+
+    .pagination{
+        text-align:center;
+    }
+}

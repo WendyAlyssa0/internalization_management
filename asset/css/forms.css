@@ -1,0 +1,187 @@
+/* ==========================================================
+   Forms Management
+========================================================== */
+
+:root{
+    --primary:#0E1C36;
+    --primary-light:#1E3A5F;
+    --accent:#C9A227;
+    --background:#f5f7fb;
+    --card:#ffffff;
+    --border:#e5e7eb;
+    --text:#1f2937;
+    --muted:#6b7280;
+    --danger:#dc2626;
+    --danger-hover:#b91c1c;
+    --shadow:0 8px 24px rgba(0,0,0,.08);
+    --radius:14px;
+}
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    font-family:"DM Sans",sans-serif;
+    background:var(--background);
+    color:var(--text);
+}
+
+/* ==========================================
+   CONTENT
+========================================== */
+
+.content{
+    display:flex;
+    flex-direction:column;
+    gap:24px;
+}
+
+/* ==========================================
+   CARD
+========================================== */
+
+.card{
+    background:var(--card);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    overflow:hidden;
+}
+
+/* ==========================================
+   HEADER
+========================================== */
+
+.card-header{
+    background:var(--primary);
+    color:#fff;
+    padding:18px 24px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+}
+
+.card-header h3{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-size:22px;
+    font-weight:700;
+}
+
+.card-header i{
+    color:var(--accent);
+}
+
+/* ==========================================
+   TABLE
+========================================== */
+
+.table{
+    width:100%;
+    border-collapse:collapse;
+}
+
+.table thead{
+    background:#f8fafc;
+}
+
+.table thead th{
+    padding:15px;
+    text-align:left;
+    font-size:14px;
+    font-weight:700;
+    color:var(--primary);
+    border-bottom:2px solid var(--border);
+}
+
+.table tbody td{
+    padding:16px;
+    border-bottom:1px solid var(--border);
+    vertical-align:middle;
+}
+
+.table tbody tr{
+    transition:.25s;
+}
+
+.table tbody tr:hover{
+    background:#f9fbfd;
+}
+
+.table tbody td:first-child{
+    font-weight:700;
+    color:var(--primary);
+    width:70px;
+}
+
+/* ==========================================
+   BUTTONS
+========================================== */
+
+.btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    text-decoration:none;
+    border:none;
+    cursor:pointer;
+    transition:.25s;
+}
+
+.btn-sm{
+    width:38px;
+    height:38px;
+    border-radius:10px;
+}
+
+.btn-danger{
+    background:var(--danger);
+    color:#fff;
+}
+
+.btn-danger:hover{
+    background:var(--danger-hover);
+    transform:translateY(-2px);
+}
+
+.btn i{
+    font-size:15px;
+}
+
+/* ==========================================
+   EMPTY STATE
+========================================== */
+
+.text-center{
+    text-align:center;
+    color:var(--muted);
+    padding:30px;
+    font-style:italic;
+}
+
+/* ==========================================
+   RESPONSIVE
+========================================== */
+
+@media (max-width:768px){
+
+    .card{
+        overflow-x:auto;
+    }
+
+    .table{
+        min-width:700px;
+    }
+
+    .card-header{
+        padding:16px 20px;
+    }
+
+    .card-header h3{
+        font-size:20px;
+    }
+
+}

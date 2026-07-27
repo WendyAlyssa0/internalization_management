@@ -1,0 +1,246 @@
+/* ==========================================================
+   Program Requirements
+========================================================== */
+
+:root{
+    --primary:#0E1C36;
+    --primary-light:#1E3A5F;
+    --accent:#C9A227;
+    --bg:#f5f7fb;
+    --card:#ffffff;
+    --border:#e5e7eb;
+    --text:#1f2937;
+    --muted:#6b7280;
+    --success:#16a34a;
+    --success-bg:#dcfce7;
+    --secondary:#6b7280;
+    --secondary-bg:#f3f4f6;
+    --shadow:0 8px 25px rgba(0,0,0,.06);
+    --radius:14px;
+}
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    background:var(--bg);
+    font-family:'DM Sans',sans-serif;
+    color:var(--text);
+}
+
+/* ===========================
+   CONTENT
+=========================== */
+
+.content-card{
+    display:flex;
+    flex-direction:column;
+    gap:24px;
+}
+
+/* ===========================
+   PAGE HEADER
+=========================== */
+
+.page-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    flex-wrap:wrap;
+    gap:10px;
+}
+
+.page-header h2{
+    font-size:28px;
+    color:var(--primary);
+    font-weight:700;
+}
+
+.page-header p{
+    color:var(--muted);
+    margin-top:5px;
+}
+
+/* ===========================
+   CARDS
+=========================== */
+
+.card,
+.table-card{
+    background:var(--card);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    padding:24px;
+}
+
+/* ===========================
+   FORM
+=========================== */
+
+form{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+    gap:20px;
+}
+
+.form-group{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+}
+
+.form-group label{
+    font-weight:600;
+    color:var(--primary);
+}
+
+.form-group input[type="text"],
+.form-group select{
+    width:100%;
+    padding:12px 14px;
+    border:1px solid var(--border);
+    border-radius:10px;
+    font-size:15px;
+    transition:.25s;
+    background:#fff;
+}
+
+.form-group input[type="text"]:focus,
+.form-group select:focus{
+    outline:none;
+    border-color:var(--primary-light);
+    box-shadow:0 0 0 3px rgba(30,58,95,.15);
+}
+
+.form-group input[type="checkbox"]{
+    margin-right:8px;
+}
+
+/* ===========================
+   BUTTON
+=========================== */
+
+.btn-primary{
+    align-self:end;
+    padding:13px 24px;
+    background:var(--primary);
+    color:#fff;
+    border:none;
+    border-radius:10px;
+    cursor:pointer;
+    font-size:15px;
+    font-weight:600;
+    transition:.25s;
+}
+
+.btn-primary:hover{
+    background:var(--primary-light);
+    transform:translateY(-2px);
+}
+
+/* ===========================
+   TABLE
+=========================== */
+
+.table-card{
+    overflow-x:auto;
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+    min-width:700px;
+}
+
+thead{
+    background:var(--primary);
+}
+
+thead th{
+    color:#fff;
+    padding:15px;
+    text-align:left;
+    font-size:14px;
+    font-weight:600;
+}
+
+tbody td{
+    padding:16px;
+    border-bottom:1px solid var(--border);
+    vertical-align:middle;
+    font-size:15px;
+}
+
+tbody tr{
+    transition:.25s;
+}
+
+tbody tr:hover{
+    background:#f8fafc;
+}
+
+/* ===========================
+   BADGES
+=========================== */
+
+.badge-success{
+    display:inline-block;
+    background:var(--success-bg);
+    color:var(--success);
+    padding:6px 12px;
+    border-radius:20px;
+    font-size:13px;
+    font-weight:600;
+}
+
+.badge-secondary{
+    display:inline-block;
+    background:var(--secondary-bg);
+    color:var(--secondary);
+    padding:6px 12px;
+    border-radius:20px;
+    font-size:13px;
+    font-weight:600;
+}
+
+/* ===========================
+   TABLE ID
+=========================== */
+
+tbody td:first-child{
+    font-weight:700;
+    color:var(--primary);
+}
+
+/* ===========================
+   RESPONSIVE
+=========================== */
+
+@media(max-width:768px){
+
+    .page-header{
+        flex-direction:column;
+        align-items:flex-start;
+    }
+
+    form{
+        grid-template-columns:1fr;
+    }
+
+    .btn-primary{
+        width:100%;
+    }
+
+    .card,
+    .table-card{
+        padding:18px;
+    }
+
+    thead th,
+    tbody td{
+        padding:12px;
+    }
+}
