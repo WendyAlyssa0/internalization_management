@@ -1,8 +1,17 @@
 <?php
 
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+
 require_once __DIR__ . '/../config/db.php';
 
 $pdo = db();
+
+$limit  = 10;
+$page   = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
+$offset = ($page - 1) * $limit;
 
 /* CSRF TOKEN */
 if (empty($_SESSION['csrf_token'])) {
@@ -16,6 +25,12 @@ function checkCsrf(): void {
         http_response_code(403);
         echo json_encode(['ok' => false, 'error' => 'Invalid CSRF token']);
         exit();
+    }
+}
+
+if (!function_exists('h')) {
+    function h($value): string {
+        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
     }
 }
 
@@ -79,11 +94,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     exit();
 }
 
-/* FETCH ALL */
-$stmt = $pdo->query("SELECT * FROM agreement_types ORDER BY id DESC");
-$agreements  = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$totalCount  = count($agreements);
+/* Total records */
+$totalCount = (int)$pdo->query("
+    SELECT COUNT(*)
+    FROM agreement_types
+")->fetchColumn();
 
+$totalPages = max(1, ceil($totalCount / $limit));
+
+/* Fetch current page only */
+$stmt = $pdo->prepare("
+    SELECT *
+    FROM agreement_types
+    ORDER BY id DESC
+    LIMIT :limit OFFSET :offset
+");
+
+$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+$stmt->execute();
+
+$agreementTypes = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -114,7 +145,6 @@ $totalCount  = count($agreements);
     <table id="agreementsTable">
       <thead>
         <tr>
-          <th>ID</th>
           <th>Agreement Type</th>
           <th>Description</th>
           <th>Status</th>
@@ -123,15 +153,22 @@ $totalCount  = count($agreements);
       </thead>
       <tbody id="agreementsBody">
 
-        <?php if (!empty($agreements)): ?>
-          <?php foreach ($agreements as $row): ?>
+    <?php if (!empty($agreementTypes)): ?>
+        <?php foreach ($agreementTypes as $row): ?>
 
             <tr data-id="<?= (int)$row['id'] ?>"
                 data-search="<?= htmlspecialchars(strtolower($row['agreement_name'] . ' ' . $row['description'])) ?>">
 
-              <td class="id-cell">#<?= (int)$row['id'] ?></td>
-
-              <td class="name-cell"><?= htmlspecialchars($row['agreement_name']) ?></td>
+              <td>
+                  <div class="agreement-cell">
+                      <div class="agreement-icon">
+                          <i class="fa-solid fa-handshake"></i>
+                      </div>
+                      <div class="agreement-info">
+                          <strong><?= htmlspecialchars($row['agreement_name']) ?></strong>
+                      </div>
+                  </div>
+              </td>
 
               <td class="description-cell"
                   title="<?= htmlspecialchars($row['description']) ?>">
@@ -177,12 +214,42 @@ $totalCount  = count($agreements);
       </tbody>
     </table>
 
-    <div class="pagination" id="paginationText">
-      Showing <?= $totalCount ?> agreement type<?= $totalCount === 1 ? '' : 's' ?>
-    </div>
 
-  </div>
+<!-- PAGINATION -->
+        <div class="pagination">
+            <span>
+                Showing <?= count($agreementTypes) ?> of <?= $totalCount ?> Agreement Types
+            </span>
+            <div class="pages">
+                <?php
+                    $baseQ = array_merge($_GET, []);
+                    unset($baseQ['p']);
+                ?>
+                <?php if ($page > 1): ?>
+                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+                <?php else: ?>
+                    <button class="page-arrow" disabled><i class="fa fa-angle-left"></i></button>
+                <?php endif; ?>
 
+                <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                    <a href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $i]))) ?>"
+                    class="<?= $i === $page ? 'active' : '' ?>">
+                        <?= $i ?>
+                    </a>
+                <?php endfor; ?>
+
+                <?php if ($page < $totalPages): ?>
+                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page + 1]))) ?>">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+                <?php else: ?>
+                    <button class="page-arrow" disabled><i class="fa fa-angle-right"></i></button>
+                <?php endif; ?>
+            </div>
+        </div>
+   </div>
 </div><!-- /.content -->
 
 

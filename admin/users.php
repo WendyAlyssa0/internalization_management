@@ -31,8 +31,20 @@ if (empty($_SESSION['csrf'])) {
     $_SESSION['csrf'] = bin2hex(random_bytes(32));
 }
 
-function h($str): string {
-    return htmlspecialchars((string) $str, ENT_QUOTES, 'UTF-8');
+if (!function_exists('h')) {
+    function h($str): string {
+        return htmlspecialchars((string) $str, ENT_QUOTES, 'UTF-8');
+    }
+}
+
+/* Helper: initials from a full name */
+function initials(string $name): string {
+    $parts = preg_split('/\s+/', trim($name));
+    $out = '';
+    foreach (array_slice($parts, 0, 2) as $p) {
+        $out .= strtoupper(substr($p, 0, 1));
+    }
+    return $out ?: '?';
 }
 
 /* =========================
@@ -47,7 +59,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
     header("Location: dashboard.php?page=users");
     exit();
 }
-
 
 /* =========================
    CREATE USER (POST)
@@ -101,7 +112,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_create'])) {
             $createErrors[] = 'Generated email already exists. Try a different name.';
         } else {
             try {
-                // Generate a random temporary password instead of a fixed string
                 $createdPass = 'PSU@' . random_int(10000, 99999);
 
                 $pdo->prepare("
@@ -141,7 +151,6 @@ $editSuccess = false;
 $editUser    = null;
 $editId      = null;
 
-// Load user for editing — either after a failed/successful POST, or from GET ?edit_id=
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_edit'])) {
     if (!hash_equals($_SESSION['csrf'], $_POST['csrf'] ?? '')) {
         die("Invalid CSRF token");
@@ -199,7 +208,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_edit'])) {
         $_SESSION['csrf'] = bin2hex(random_bytes(32));
     }
 
-    // Re-fetch user for modal re-population
     $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ? LIMIT 1");
     $stmt->execute([$editId]);
     $editUser = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -221,19 +229,16 @@ $page       = max(1, (int) ($_GET['p'] ?? 1));
 $limit      = 10;
 $offset     = ($page - 1) * $limit;
 $totalUsers = (int) $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
+$totalPages = max(1, (int)ceil($totalUsers / $limit));
 
-$stmt = $pdo->prepare("
-    SELECT id, first_name, last_name, extension_name,
-           user_role, status, created_at
-    FROM users
-    ORDER BY id DESC
-    LIMIT $limit OFFSET $offset
-");
+$stmt = $pdo->prepare("SELECT id, first_name, last_name, extension_name, user_role, status, created_at FROM users ORDER BY id DESC LIMIT :limit OFFSET :offset");
+$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
 $stmt->execute();
 $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <link rel="stylesheet" href="../asset/css/users.css">
-<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
 <div class="content">
@@ -284,7 +289,12 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <tr data-name="<?= h(strtolower($fullname)) ?>"
                         data-role="<?= h($role) ?>">
 
-                        <td><?= h($fullname) ?></td>
+                        <td>
+                            <div class="user-name-cell">
+                                <div class="user-avatar"><?= h(initials($fullname)) ?></div>
+                                <span><?= h($fullname) ?></span>
+                            </div>
+                        </td>
                         <td>
                             <span class="badge"><?= h(ucwords($u['user_role'])) ?></span>
                         </td>
@@ -295,32 +305,75 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         </td>
                         <td><?= date('M d, Y', strtotime($u['created_at'])) ?></td>
                         <td>
-                            <!-- Edit button now opens modal -->
-                            <a href="?page=users&edit_id=<?= $u['id'] ?>"
-                               class="action-btn edit-btn"
-                               title="Edit user">
-                                <i class="fa fa-pen"></i>
-                            </a>
-
-                            <form method="POST" style="display:inline;"
-                                  onsubmit="return confirm('Delete this user?')">
-                                <input type="hidden" name="delete_id" value="<?= $u['id'] ?>">
-                                <input type="hidden" name="csrf"      value="<?= h($_SESSION['csrf']) ?>">
-                                <button type="submit" class="action-btn delete-btn">
-                                    <i class="fa fa-trash"></i>
-                                </button>
-                            </form>
+                            <div class="actions">
+                                <a href="?page=users&edit_id=<?= (int)$u['id'] ?>"
+                                   class="action-btn edit-btn"
+                                   title="Edit user">
+                                    <i class="fa fa-pen"></i>
+                                </a>
+                                <form method="POST" style="display:inline;"
+                                      onsubmit="return confirm('Delete this user?')">
+                                    <input type="hidden" name="delete_id" value="<?= (int)$u['id'] ?>">
+                                    <input type="hidden" name="csrf"      value="<?= h($_SESSION['csrf']) ?>">
+                                    <button type="submit" class="action-btn delete-btn" title="Delete user">
+                                        <i class="fa fa-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
                         </td>
                     </tr>
                 <?php endforeach; ?>
             <?php else: ?>
-                <tr><td colspan="6">No users found</td></tr>
+                <tr>
+                    <td colspan="5">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                                    <circle cx="9" cy="7" r="4"/>
+                                    <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                                </svg>
+                            </div>
+                            <h3>No users found</h3>
+                            <p>Click "Add Account" to create your first user.</p>
+                        </div>
+                    </td>
+                </tr>
             <?php endif; ?>
             </tbody>
         </table>
 
         <div class="pagination">
-            Showing <?= count($users) ?> of <?= $totalUsers ?> users
+            <span>Showing <?= count($users) ?> of <?= $totalUsers ?> user<?= $totalUsers === 1 ? '' : 's' ?></span>
+            <div class="pages">
+                <?php
+                    $baseQ = $_GET;
+                    unset($baseQ['p'], $baseQ['edit_id']);
+                ?>
+                <?php if ($page > 1): ?>
+                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+                <?php else: ?>
+                    <button class="page-arrow" disabled><i class="fa fa-angle-left"></i></button>
+                <?php endif; ?>
+
+                <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                    <a href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $i]))) ?>"
+                       class="<?= $i === $page ? 'active' : '' ?>">
+                        <?= $i ?>
+                    </a>
+                <?php endfor; ?>
+
+                <?php if ($page < $totalPages): ?>
+                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page + 1]))) ?>">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+                <?php else: ?>
+                    <button class="page-arrow" disabled><i class="fa fa-angle-right"></i></button>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
 </div>
@@ -355,12 +408,12 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <?php if ($createSuccess): ?>
                 <div class="success-box">
                     <div><strong><i class="fa-solid fa-circle-check"></i> Account created successfully!</strong></div>
-                    <div style="font-size:.825rem;opacity:.9;margin-top:.25rem">
+                    <div class="success-detail">
                         Email: <strong><?= h($createdEmail) ?></strong>
                         &nbsp;·&nbsp;
                         Temporary password: <strong><?= h($createdPass) ?></strong>
                     </div>
-                    <div style="font-size:.8rem;opacity:.8;margin-top:.15rem">
+                    <div class="success-note">
                         Share this password with the user securely — it will not be shown again.
                     </div>
                 </div>
@@ -514,13 +567,11 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <?php if ($editSuccess): ?>
                 <div class="success-box">
                     <div><strong><i class="fa-solid fa-circle-check"></i> Changes saved successfully!</strong></div>
-                    <div style="font-size:.825rem;opacity:.9;margin-top:.25rem">The user record has been updated.</div>
+                    <div class="success-detail">The user record has been updated.</div>
                 </div>
             <?php endif; ?>
 
             <?php
-            // Determine field values: POST data takes priority (for re-population on error),
-            // then fall back to the fetched user record.
             $ev = function($postKey, $userKey) use ($editUser) {
                 return h($_POST[$postKey] ?? $editUser[$userKey] ?? '');
             };
@@ -640,127 +691,6 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 </div>
 
 
-<!-- =====================================================================
-     SHARED MODAL STYLES
-====================================================================== -->
-<style>
-.modal-backdrop {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,.45);
-    z-index: 1000;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-}
-.modal-backdrop.open { display: flex; }
-
-.modal-box {
-    background: #fff;
-    border-radius: 14px;
-    width: 100%;
-    max-width: 700px;
-    max-height: 90vh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 20px 60px rgba(0,0,0,.2);
-    animation: modalIn .18s ease;
-}
-@keyframes modalIn {
-    from { opacity: 0; transform: translateY(-12px) scale(.98); }
-    to   { opacity: 1; transform: translateY(0)      scale(1);   }
-}
-
-.modal-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 20px 24px 16px;
-    border-bottom: 1px solid #f0f0f0;
-    flex-shrink: 0;
-}
-.modal-header h3 { font-size: 17px; font-weight: 600; color: #111827; margin: 0 0 3px; }
-.modal-header p  { font-size: 13px; color: #6b7280; margin: 0; }
-
-.modal-close {
-    background: none; border: none; cursor: pointer;
-    color: #9ca3af; font-size: 18px; padding: 4px 6px;
-    border-radius: 6px; line-height: 1; flex-shrink: 0;
-    transition: background .12s, color .12s;
-}
-.modal-close:hover { background: #f3f4f6; color: #374151; }
-
-.modal-body { padding: 20px 24px 24px; overflow-y: auto; flex: 1; }
-
-.form-section-title {
-    font-size: 12px; font-weight: 600; color: #6b7280;
-    text-transform: uppercase; letter-spacing: .05em;
-    margin: 18px 0 10px; padding-bottom: 6px;
-    border-bottom: 1px solid #f0f0f0;
-}
-.form-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
-.form-group { display: flex; flex-direction: column; gap: 5px; }
-.form-group label { font-size: 13px; font-weight: 500; color: #374151; }
-.form-group input,
-.form-group select {
-    padding: 8px 11px; border: 1px solid #e5e7eb;
-    border-radius: 8px; font-size: 13.5px; color: #111827;
-    background: #fff; outline: none; transition: border-color .15s;
-    width: 100%; box-sizing: border-box;
-}
-.form-group input:focus,
-.form-group select:focus { border-color: #0E1C36; }
-.form-group input[readonly] { background: #f9fafb; color: #6b7280; cursor: default; }
-
-.col-2  { grid-column: span 2; }
-.col-3  { grid-column: span 3; }
-.col-4  { grid-column: span 4; }
-.col-5  { grid-column: span 5; }
-.col-6  { grid-column: span 6; }
-.col-12 { grid-column: span 12; }
-
-.required { color: #ef4444; margin-left: 2px; }
-
-.error-box {
-    background: #fef2f2; border: 1px solid #fecaca;
-    border-radius: 8px; padding: 12px 14px;
-    font-size: 13px; color: #b91c1c; margin-bottom: 14px;
-}
-.error-box div { margin-bottom: 4px; }
-.error-box div:last-child { margin-bottom: 0; }
-
-.success-box {
-    background: #f0fdf4; border: 1px solid #bbf7d0;
-    border-radius: 8px; padding: 12px 14px;
-    font-size: 13px; color: #15803d; margin-bottom: 14px;
-}
-
-.form-instructions { font-size: 12px; color: #9ca3af; margin: 0; }
-
-.form-actions {
-    display: flex; justify-content: flex-end; gap: 10px;
-    margin-top: 20px; padding-top: 16px; border-top: 1px solid #f0f0f0;
-}
-.btn-cancel {
-    padding: 9px 18px; border: 1px solid #e5e7eb; border-radius: 8px;
-    background: #fff; font-size: 13.5px; color: #374151; cursor: pointer;
-    text-decoration: none; transition: background .12s;
-}
-.btn-cancel:hover { background: #f9fafb; }
-.btn-submit {
-    padding: 9px 18px; background: #0E1C36; color: #fff; border: none;
-    border-radius: 8px; font-size: 13.5px; font-weight: 500;
-    cursor: pointer; transition: opacity .15s;
-}
-.btn-submit:hover { opacity: .88; }
-</style>
-
-
-<!-- =====================================================================
-     SCRIPTS
-====================================================================== -->
 <script>
 (function () {
 
@@ -771,7 +701,7 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
     function filterTable() {
         var search = searchInput.value.toLowerCase();
         var role   = roleFilter.value.toLowerCase();
-        document.querySelectorAll('#tableBody tr').forEach(function (row) {
+        document.querySelectorAll('#tableBody tr[data-name]').forEach(function (row) {
             var name     = row.dataset.name || '';
             var userRole = row.dataset.role || '';
             row.style.display =
@@ -803,19 +733,15 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
         });
     }
 
-    /* ── CREATE modal ── */
     bindModal('createModal', 'openModalBtn', 'closeCreateModalBtn', 'cancelCreateModalBtn');
+    bindModal('editModal', null, 'closeEditModalBtn', 'cancelEditModalBtn');
 
     var reopenCreate = <?= $reopenCreateModal ? 'true' : 'false' ?>;
     if (reopenCreate) openModal(document.getElementById('createModal'));
 
-    /* ── EDIT modal ── */
-    bindModal('editModal', null, 'closeEditModalBtn', 'cancelEditModalBtn');
-
     var reopenEdit = <?= $reopenEditModal ? 'true' : 'false' ?>;
     if (reopenEdit) openModal(document.getElementById('editModal'));
 
-    /* Close both on Escape */
     document.addEventListener('keydown', function(e) {
         if (e.key !== 'Escape') return;
         ['createModal','editModal'].forEach(function(id) {

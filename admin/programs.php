@@ -4,11 +4,12 @@ require_once __DIR__ . '/../config/db.php';
 
 $pdo = db();
 
+$limit  = 10;
+$page   = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
+$offset = ($page - 1) * $limit;
 
-   //SAFE HELPER FUNCTION
-
+/* SAFE HELPER FUNCTION */
 if (!function_exists('h')) {
-
     function h($value): string {
         return htmlspecialchars(
             (string)$value,
@@ -17,22 +18,17 @@ if (!function_exists('h')) {
         );
     }
 }
-   //DELETE PROGRAM
 
+/* DELETE PROGRAM */
 if (isset($_GET['delete'])) {
-
     $id = (int)$_GET['delete'];
-    $stmt = $pdo->prepare("
-        DELETE FROM programs
-        WHERE id = ?
-    ");
-
+    $stmt = $pdo->prepare("DELETE FROM programs WHERE id = ?");
     $stmt->execute([$id]);
     header("Location: programs.php");
     exit();
 }
 
-   //LOAD PARTNERS
+/* LOAD PARTNERS */
 $partnerStmt = $pdo->query("
     SELECT id, institution_name
     FROM partners
@@ -41,18 +37,24 @@ $partnerStmt = $pdo->query("
 ");
 $partners = $partnerStmt->fetchAll(PDO::FETCH_ASSOC);
 
-  // LOAD COUNTRIES
+/* LOAD COUNTRIES */
 $countryStmt = $pdo->query("
     SELECT id, country_name
     FROM countries
     WHERE status = 'Active'
     ORDER BY country_name
 ");
-
 $countries = $countryStmt->fetchAll(PDO::FETCH_ASSOC);
 
-   //FETCH PROGRAMS
-$stmt = $pdo->query("
+
+$totalPrograms = (int)$pdo->query("
+    SELECT COUNT(*) FROM programs
+")->fetchColumn();
+
+$totalPages = max(1, ceil($totalPrograms / $limit));
+
+/* FETCH PROGRAMS */
+$stmt = $pdo->prepare("
     SELECT
         p.*,
         c.country_name,
@@ -63,10 +65,14 @@ $stmt = $pdo->query("
     LEFT JOIN partners pr
         ON p.partner_id = pr.id
     ORDER BY p.id DESC
+    LIMIT :limit OFFSET :offset
 ");
 
-$programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+$stmt->execute();
 
+$programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <link rel="stylesheet" href="../asset/css/programs.css">
@@ -81,16 +87,13 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     <!-- TOOLBAR -->
     <div class="toolbar">
-
         <div class="search-wrap">
             <i class="fa fa-search"></i>
             <input type="text" id="searchInput" placeholder="Search programs...">
         </div>
-
         <button class="create-btn" onclick="openProgramModal()">
             <i class="fa fa-plus"></i> Add Program
         </button>
-
     </div>
 
     <!-- TABLE -->
@@ -107,50 +110,108 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <th>Action</th>
                 </tr>
             </thead>
-
             <tbody id="tableBody">
-            <?php foreach ($programs as $p): ?>
-                <tr data-name="<?= strtolower(h($p['program_name'])) ?>">
-
-                    <td><?= h($p['program_name']) ?></td>
-                    <td><?= h($p['program_type']) ?></td>
-                    <td><?= h($p['country_name']) ?></td>
-                    <td><?= h($p['institution_name']) ?></td>
-
-                    <td>
-                        <span class="status-badge <?= strtolower($p['status']) ?>">
-                            <?= h($p['status']) ?>
-                        </span>
+            <?php if ($programs): ?>
+                <?php foreach ($programs as $p): ?>
+                    <tr data-name="<?= strtolower(h($p['program_name'])) ?>">
+                        <td>
+                            <div class="program-name">
+                                <div class="program-icon">
+                                    <i class="fa fa-graduation-cap"></i>
+                                </div>
+                                <div class="program-info">
+                                    <strong><?= h($p['program_name']) ?></strong>
+                                </div>
+                            </div>
+                        </td>
+                        <td><?= h($p['program_type']) ?></td>
+                        <td><?= h($p['country_name']) ?></td>
+                        <td><?= h($p['institution_name']) ?></td>
+                        <td>
+                            <span class="status-badge <?= strtolower(h($p['status'])) ?>">
+                                <?= h($p['status']) ?>
+                            </span>
+                        </td>
+                        <td>
+                            <?= date('M d, Y', strtotime($p['start_date'])) ?>
+                            -
+                            <?= date('M d, Y', strtotime($p['end_date'])) ?>
+                        </td>
+                        <td>
+                            <button type="button"
+                                    class="action-btn edit-btn"
+                                    onclick="openEditProgramModal(<?= (int)$p['id'] ?>)">
+                                <i class="fa fa-pen"></i>
+                            </button>
+                            <a href="programs.php?delete=<?= $p['id'] ?>"
+                               onclick="return confirm('Delete this program?')"
+                               class="action-btn delete-btn">
+                                <i class="fa fa-trash"></i>
+                            </a>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <tr>
+                    <td colspan="7">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+                                    <path d="M6 12v5c3 3 9 3 12 0v-5"/>
+                                </svg>
+                            </div>
+                            <h3>No programs yet</h3>
+                            <p>Click "Add Program" to create your first one.</p>
+                        </div>
                     </td>
-
-                    <td>
-                        <?= date('M d, Y', strtotime($p['start_date'])) ?>
-                        -
-                        <?= date('M d, Y', strtotime($p['_end_date'])) ?> 
-                    <td>
-                <td>
-                        <button type="button"
-                                class="action-btn edit-btn"
-                                onclick="openEditProgramModal(<?= (int)$p['id'] ?>)">
-                            <i class="fa fa-pen"></i>
-                        </button>
-
-                        <a href="programs.php?delete=<?= $p['id'] ?>"
-                           onclick="return confirm('Delete this program?')"
-                           class="action-btn delete-btn">
-                            <i class="fa fa-trash"></i>
-                        </a>
-                    </td>
-
                 </tr>
-            <?php endforeach; ?>
+            <?php endif; ?>
             </tbody>
         </table>
+
+    <!-- PAGINATION -->
+        <div class="pagination">
+            <span>
+                Showing <?= count($programs) ?> of <?= $totalPrograms ?> programs
+            </span>
+            <div class="pages">
+                <?php
+                    $baseQ = array_merge($_GET, []);
+                    unset($baseQ['p']);
+                ?>
+                <?php if ($page > 1): ?>
+                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+                <?php else: ?>
+                    <button class="page-arrow" disabled><i class="fa fa-angle-left"></i></button>
+                <?php endif; ?>
+
+                <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                    <a href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $i]))) ?>"
+                    class="<?= $i === $page ? 'active' : '' ?>">
+                        <?= $i ?>
+                    </a>
+                <?php endfor; ?>
+
+                <?php if ($page < $totalPages): ?>
+                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page + 1]))) ?>">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+                <?php else: ?>
+                    <button class="page-arrow" disabled><i class="fa fa-angle-right"></i></button>
+                <?php endif; ?>
+            </div>
+        </div>
+
     </div>
 
 </div>
 
-
+<!-- =========================
+     EDIT PROGRAM MODAL
+========================= -->
 <div id="editProgramModal" class="modal-overlay" onclick="closeEditProgramOutside(event)">
     <div class="modal-box">
 
@@ -200,23 +261,31 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     </div>
                 </div>
 
-                <select name="partner_id" class="form-input" required>
-                    <option value="">Select Partner</option>
-                    <?php foreach($partners as $partner): ?>
-                        <option value="<?= $partner['id'] ?>">
-                            <?= h($partner['institution_name']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Partner Institution</label>
+                        <select name="partner_id" id="edit_partner_id" class="form-input" required>
+                            <option value="">Select Partner</option>
+                            <?php foreach ($partners as $partner): ?>
+                                <option value="<?= $partner['id'] ?>">
+                                    <?= h($partner['institution_name']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
 
-                <select name="country_id" class="form-input" required>
-                    <option value="">Select Country</option>
-                    <?php foreach($countries as $country): ?>
-                        <option value="<?= $country['id'] ?>">
-                            <?= h($country['country_name']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
+                    <div class="form-group">
+                        <label>Country</label>
+                        <select name="country_id" id="edit_country_id" class="form-input" required>
+                            <option value="">Select Country</option>
+                            <?php foreach ($countries as $country): ?>
+                                <option value="<?= $country['id'] ?>">
+                                    <?= h($country['country_name']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
 
                 <div class="form-row">
                     <div class="form-group">
@@ -239,19 +308,19 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             <div class="modal-footer">
                 <button type="button" class="btn-secondary" onclick="closeEditProgramModal()">Cancel</button>
-                <button type="submit" class="btn-confirm">Update Program</button>
+                <button type="submit" class="btn-confirm"><i class="fa fa-floppy-disk"></i> Update Program</button>
             </div>
 
         </form>
     </div>
 </div>
+
 <!-- =========================
      ADD PROGRAM MODAL
 ========================= -->
 <div id="programModal" class="modal-overlay" onclick="closeProgramModalOutside(event)">
     <div class="modal-box">
 
-        <!-- HEADER -->
         <div class="modal-header">
             <div class="modal-header-left">
                 <div class="modal-icon">
@@ -267,11 +336,9 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
             </button>
         </div>
 
-        <!-- FORM -->
         <form id="programForm">
             <div class="modal-body">
 
-                <!-- Program Name -->
                 <div class="form-group">
                     <label class="form-label">
                         <i class="fa fa-book"></i> Program Name
@@ -283,7 +350,6 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                            required>
                 </div>
 
-                <!-- Type + Status -->
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">
@@ -309,44 +375,36 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     </div>
                 </div>
 
-                <!-- Partner + Country -->
-<div class="form-row">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">
+                            <i class="fa fa-building"></i> Partner Institution
+                        </label>
+                        <select name="partner_id" class="form-input" required>
+                            <option value="">Select Partner</option>
+                            <?php foreach ($partners as $partner): ?>
+                                <option value="<?= $partner['id'] ?>">
+                                    <?= h($partner['institution_name']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
 
-    <div class="form-group">
-        <label class="form-label">
-            <i class="fa fa-building"></i> Partner Institution
-        </label>
+                    <div class="form-group">
+                        <label class="form-label">
+                            <i class="fa fa-globe"></i> Country
+                        </label>
+                        <select name="country_id" class="form-input" required>
+                            <option value="">Select Country</option>
+                            <?php foreach ($countries as $country): ?>
+                                <option value="<?= $country['id'] ?>">
+                                    <?= h($country['country_name']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
 
-        <select name="partner_id" class="form-input" required>
-            <option value="">Select Partner</option>
-
-            <?php foreach($partners as $partner): ?>
-                <option value="<?= $partner['id'] ?>">
-                    <?= h($partner['institution_name']) ?>
-                </option>
-            <?php endforeach; ?>
-        </select>
-    </div>
-
-    <div class="form-group">
-        <label class="form-label">
-            <i class="fa fa-globe"></i> Country
-        </label>
-
-        <select name="country_id" class="form-input" required>
-            <option value="">Select Country</option>
-
-            <?php foreach($countries as $country): ?>
-                <option value="<?= $country['id'] ?>">
-                    <?= h($country['country_name']) ?>
-                </option>
-            <?php endforeach; ?>
-        </select>
-    </div>
-
-</div>
-
-                <!-- Start + End Date -->
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">
@@ -362,7 +420,6 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     </div>
                 </div>
 
-                <!-- Description -->
                 <div class="form-group">
                     <label class="form-label">
                         <i class="fa fa-align-left"></i> Description
@@ -375,7 +432,6 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             </div>
 
-            <!-- FOOTER -->
             <div class="modal-footer">
                 <button type="button" class="btn-secondary" onclick="closeProgramModal()">
                     Cancel
@@ -403,7 +459,7 @@ document.getElementById('searchInput').addEventListener('input', function () {
 });
 
 /* =========================
-   MODAL
+   ADD PROGRAM MODAL
 ========================= */
 function openProgramModal() {
     document.getElementById('programModal').classList.add('open');
@@ -420,10 +476,9 @@ function closeProgramModalOutside(e) {
     if (e.target.id === 'programModal') closeProgramModal();
 }
 
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeProgramModal();
-});
-
+/* =========================
+   EDIT PROGRAM MODAL
+========================= */
 function openEditProgramModal(id) {
     document.getElementById('editProgramModal').classList.add('open');
     document.body.style.overflow = 'hidden';
@@ -431,19 +486,19 @@ function openEditProgramModal(id) {
     fetch('get_program.php?id=' + id)
         .then(res => res.json())
         .then(data => {
-
-            document.getElementById('edit_id').value = data.id;
-            document.getElementById('edit_program_name').value = data.program_name;
-            document.getElementById('edit_program_type').value = data.program_type;
-            document.getElementById('edit_status').value = data.status;
-            document.getElementById('edit_partner_id').value = data.partner_id;
-            document.getElementById('edit_country_id').value = data.country_id;
-            document.getElementById('edit_start').value = data.start_date;
-            document.getElementById('edit_end').value = data._end_date;
-            document.getElementById('edit_description').value = data.description;
+            document.getElementById('edit_id').value             = data.id;
+            document.getElementById('edit_program_name').value   = data.program_name;
+            document.getElementById('edit_program_type').value   = data.program_type;
+            document.getElementById('edit_status').value         = data.status;
+            document.getElementById('edit_partner_id').value     = data.partner_id;
+            document.getElementById('edit_country_id').value     = data.country_id;
+            document.getElementById('edit_start').value          = data.start_date;
+            document.getElementById('edit_end').value            = data.end_date;
+            document.getElementById('edit_description').value    = data.description;
         })
         .catch(() => {
-            alert('Cannot load program data');
+            showToast('error', 'Cannot load program data');
+            closeEditProgramModal();
         });
 }
 
@@ -453,20 +508,32 @@ function closeEditProgramModal() {
 }
 
 function closeEditProgramOutside(e) {
-    if (e.target.id === 'editProgramModal') {
-        closeEditProgramModal();
-    }
+    if (e.target.id === 'editProgramModal') closeEditProgramModal();
 }
 
-/* submit update */
+/* =========================
+   EDIT FORM SUBMIT
+========================= */
 document.getElementById('editProgramForm').addEventListener('submit', function(e) {
     e.preventDefault();
+
+    const btn      = this.querySelector('[type="submit"]');
+    const original = btn.innerHTML;
+    btn.disabled    = true;
+    btn.textContent  = 'Updating...';
 
     fetch('update_program.php', {
         method: 'POST',
         body: new FormData(this)
     })
-    .then(res => res.json())
+    .then(async res => {
+        const text = await res.text();
+        try {
+            return JSON.parse(text);
+        } catch {
+            throw new Error('Server did not return JSON');
+        }
+    })
     .then(data => {
         showToast(data.success ? 'success' : 'error', data.message);
         if (data.success) {
@@ -476,18 +543,23 @@ document.getElementById('editProgramForm').addEventListener('submit', function(e
     })
     .catch(() => {
         showToast('error', 'Server error');
+    })
+    .finally(() => {
+        btn.disabled    = false;
+        btn.innerHTML   = original;
     });
 });
+
 /* =========================
-   FORM SUBMIT
+   ADD FORM SUBMIT
 ========================= */
 document.getElementById('programForm').addEventListener('submit', function (e) {
     e.preventDefault();
 
     const btn      = this.querySelector('[type="submit"]');
-    const original = btn.textContent;
+    const original = btn.innerHTML;
     btn.disabled    = true;
-    btn.textContent = 'Saving...';
+    btn.textContent  = 'Saving...';
 
     fetch('add_program_modal.php', {
         method: 'POST',
@@ -498,7 +570,6 @@ document.getElementById('programForm').addEventListener('submit', function (e) {
         try {
             return JSON.parse(text);
         } catch {
-            console.error('Invalid response:', text);
             throw new Error('Server did not return JSON');
         }
     })
@@ -509,14 +580,23 @@ document.getElementById('programForm').addEventListener('submit', function (e) {
             setTimeout(() => location.reload(), 1200);
         }
     })
-    .catch(err => {
-        console.error(err);
+    .catch(() => {
         showToast('error', 'Something went wrong. Please try again.');
     })
     .finally(() => {
         btn.disabled    = false;
-        btn.textContent = original;
+        btn.innerHTML   = original;
     });
+});
+
+/* =========================
+   ESC KEY HANDLER
+========================= */
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+        closeProgramModal();
+        closeEditProgramModal();
+    }
 });
 
 /* =========================
@@ -530,11 +610,14 @@ function showToast(type, message) {
     toast.className = `toast toast--${type}`;
     toast.innerHTML = `
         <i class="fa fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
-        <span>${message}</span>
+        <span></span>
     `;
+    toast.querySelector('span').textContent = message;
+
     document.body.appendChild(toast);
 
-    setTimeout(() => toast.classList.add('toast--show'), 10);
+    requestAnimationFrame(() => toast.classList.add('toast--show'));
+
     setTimeout(() => {
         toast.classList.remove('toast--show');
         setTimeout(() => toast.remove(), 300);

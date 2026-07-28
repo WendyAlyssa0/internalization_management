@@ -202,9 +202,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </svg>
 
         <div class="left-content">
-            <div class="left-logo">
-                <img src="../asset/img/psu_logo.png" alt="PSU Logo">
-            </div>
+
             <div class="left-eyebrow">Pangasinan State University</div>
             <div class="left-title"><span class="accent">PSU</span><br>Internalization</div>
             <div class="left-underline"></div>

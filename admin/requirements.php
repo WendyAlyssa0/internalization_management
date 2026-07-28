@@ -1,7 +1,21 @@
 <?php
 require_once __DIR__ . '/../config/db.php';
 
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 $pdo = db();
+
+$limit  = 10;
+$page   = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
+$offset = ($page - 1) * $limit;
+
+if (!function_exists('h')) {
+    function h($value): string {
+        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+    }
+}
 
 /* CSRF TOKEN */
 if (empty($_SESSION['csrf_token'])) {
@@ -82,15 +96,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 /* FETCH */
-$stmt = $pdo->query("
+$totalCount = (int)$pdo->query("
+    SELECT COUNT(*)
+    FROM requirements
+")->fetchColumn();
+
+$totalPages = max(1, ceil($totalCount / $limit));
+
+$stmt = $pdo->prepare("
     SELECT *
     FROM requirements
     ORDER BY id DESC
+    LIMIT :limit OFFSET :offset
 ");
+$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+$stmt->execute();
 
 $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$totalCount = count($requirements);
-
 ?>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -123,7 +146,6 @@ $totalCount = count($requirements);
 
       <thead>
         <tr>
-          <th>ID</th>
           <th>Requirement Name</th>
           <th>Description</th>
           <th>Date Added</th>
@@ -146,7 +168,6 @@ $totalCount = count($requirements);
 
             <tr data-id="<?= (int)$r['id'] ?>"
                 data-search="<?= htmlspecialchars(strtolower($r['requirement_name'] . ' ' . $r['description'])) ?>">
-              <td class="id-cell">#<?= (int)$r['id'] ?></td>
               <td class="name-cell"><?= htmlspecialchars($r['requirement_name']) ?></td>
               <td class="description-cell" title="<?= htmlspecialchars($r['description']) ?>">
                 <?= htmlspecialchars($r['description']) ?>
@@ -186,9 +207,40 @@ $totalCount = count($requirements);
 
     </table>
 
-    <div class="pagination" id="paginationText">
-      Showing <?= $totalCount ?> requirement<?= $totalCount === 1 ? '' : 's' ?>
-    </div>
+<!-- PAGINATION -->
+        <div class="pagination">
+            <span>
+                Showing <?= count($requirements) ?> of <?= $totalCount ?> requirement<?= $totalCount === 1 ? '' : 's' ?>
+            </span>
+            <div class="pages">
+                <?php
+                    $baseQ = array_merge($_GET, []);
+                    unset($baseQ['p']);
+                ?>
+                <?php if ($page > 1): ?>
+                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+                <?php else: ?>
+                    <button class="page-arrow" disabled><i class="fa fa-angle-left"></i></button>
+                <?php endif; ?>
+
+                <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                    <a href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $i]))) ?>"
+                    class="<?= $i === $page ? 'active' : '' ?>">
+                        <?= $i ?>
+                    </a>
+                <?php endfor; ?>
+
+                <?php if ($page < $totalPages): ?>
+                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page + 1]))) ?>">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+                <?php else: ?>
+                    <button class="page-arrow" disabled><i class="fa fa-angle-right"></i></button>
+                <?php endif; ?>
+            </div>
+        </div>
 
   </div>
 

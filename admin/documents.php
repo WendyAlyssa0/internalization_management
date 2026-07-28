@@ -11,6 +11,11 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 $pdo = db();
+
+$limit  = 10;
+$page   = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
+$offset = ($page - 1) * $limit;
+
 $user_id = $_SESSION['user_id'];
 $role = strtolower($_SESSION['user_role'] ?? '');
 function h($value): string {
@@ -96,15 +101,19 @@ $sql = "
     LEFT JOIN users u ON d.user_id = u.id
     $where
     ORDER BY d.created_at DESC
-    LIMIT $limit OFFSET $offset
+    LIMIT :limit OFFSET :offset
 ";
 
 $stmt = $pdo->prepare($sql);
-$stmt->execute($params);
-$documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
+foreach ($params as $i => $val) {
+    $stmt->bindValue($i + 1, $val);
+}
+$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+$stmt->execute();
 
-
-$totalPages = ceil($totalDocs / $limit);
+$documents  = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$totalPages = max(1, ceil($totalDocs / $limit));
 ?>
 
 <link rel="stylesheet" href="../asset/css/applications.css">
@@ -144,7 +153,6 @@ $totalPages = ceil($totalDocs / $limit);
 <table class="table-card">
 <thead>
 <tr>
-    <th>ID</th>
     <th>Uploader</th>
     <th>Title</th>
     <th>Type</th>
@@ -158,13 +166,13 @@ $totalPages = ceil($totalDocs / $limit);
 <?php if (!empty($documents)): ?>
     <?php foreach ($documents as $d): ?>
 <tr>
-    <td>#<?= h($d['id']) ?></td>
     <td><?= h($d['uploader']) ?></td>
     <td><?= h($d['title']) ?></td>
     <td><?= h($d['file_type']) ?></td>
 
     <td>
-<span class="status-badge status-<?= strtolower($d['status']) ?>">            <?= ucfirst($d['status']) ?>
+<span class="status-badge status-<?= strtolower($d['status']) ?>">
+                <?= ucfirst($d['status']) ?>
         </span>
     </td>
 
@@ -198,6 +206,42 @@ $totalPages = ceil($totalDocs / $limit);
 <?php endif; ?>
 </tbody>
 </table>
+
+<!-- PAGINATION -->
+        <div class="pagination">
+            <span>
+                Showing <?= count($documents) ?> of <?= $totalDocs ?> documents
+            </span>
+            <div class="pages">
+                <?php
+                    $baseQ = array_merge($_GET, []);
+                    unset($baseQ['p']);
+                ?>
+                <?php if ($page > 1): ?>
+                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+                <?php else: ?>
+                    <button class="page-arrow" disabled><i class="fa fa-angle-left"></i></button>
+                <?php endif; ?>
+
+                <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                    <a href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $i]))) ?>"
+                    class="<?= $i === $page ? 'active' : '' ?>">
+                        <?= $i ?>
+                    </a>
+                <?php endfor; ?>
+
+                <?php if ($page < $totalPages): ?>
+                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page + 1]))) ?>">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+                <?php else: ?>
+                    <button class="page-arrow" disabled><i class="fa fa-angle-right"></i></button>
+                <?php endif; ?>
+            </div>
+        </div>
+
 </div>
 
 </div>

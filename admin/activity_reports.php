@@ -65,31 +65,6 @@ foreach ($activities as $a) {
     <p>Tracks student performance, weekly reports, and supervisor feedback.</p>
 </div>
 
-<!-- ================= STATS ================= -->
-<div class="stats-grid">
-
-    <div class="stat-card">
-        <h3><?= $total ?></h3>
-        <p>Total Activities</p>
-    </div>
-
-    <div class="stat-card">
-        <h3><?= $ongoing ?></h3>
-        <p>Ongoing</p>
-    </div>
-
-    <div class="stat-card">
-        <h3><?= $completed ?></h3>
-        <p>Completed</p>
-    </div>
-
-    <div class="stat-card">
-        <h3><?= $delayed ?></h3>
-        <p>Delayed</p>
-    </div>
-
-</div>
-
 <!-- ================= TABLE ================= -->
 <div class="table-card">
 
@@ -100,7 +75,6 @@ foreach ($activities as $a) {
     <th>Student</th>
     <th>Week</th>
     <th>Report</th>
-    <th>Supervisor Feedback</th>
     <th>Progress</th>
     <th>Status</th>
 </tr>
@@ -127,10 +101,6 @@ $progress = (int)$a['progress'];
 
     <td>
         <?= h(mb_strimwidth($a['report'] ?? '', 0, 80, '...')) ?>
-    </td>
-
-    <td>
-        <?= h(mb_strimwidth($a['supervisor_feedback'] ?? '', 0, 80, '...')) ?>
     </td>
 
     <td>

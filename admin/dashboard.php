@@ -5,6 +5,33 @@ requireAdmin();
 
 $page = $_GET['page'] ?? 'home';
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+    switch ($page) {
+
+        case 'countries_addresses':
+            require 'countries_addresses.php';
+            exit;
+
+        case 'program_category':
+            require 'program_category.php';
+            exit;
+
+        case 'agreement_types':
+            require 'agreement_types.php';
+            exit;
+
+        case 'partners':
+            require 'partners.php';
+            exit;
+
+        case 'programs':
+            require 'programs.php';
+            exit;
+
+        // Add other AJAX pages here...
+    }
+}
 /*
 |--------------------------------------------------------------------------
 | VALID PAGES
@@ -16,9 +43,10 @@ $validPages = [
     'home',
 
     // Master Data
-    'countries',
+    'countries_addresses',
     'partners',
     'agreement_types',
+    'program_category',
 
     // Program Management
     'programs',
@@ -28,19 +56,20 @@ $validPages = [
     // Applications
     'applications',
     'documents',
+    'program_requirement',
 
     // Student Mobility
     'student_management',
+    'approved_students',
     'travel_information',
-    'activity_monitoring',
-
+    'activity_reports',
+    
     // Communication
     'notifications',
-    'messages',
+    'announcements',
 
     // Administration
     'users',
-    'reports',
     'audit_trail'
 ];
 
@@ -82,6 +111,9 @@ $firstName = $_SESSION['first_name'] ?? 'Administrator';
 <div class="topbar">
 
     <div class="topbar-left">
+        <button class="sidebar-toggle" id="sidebarToggle" aria-label="Open menu">
+            <span class="material-symbols-outlined">menu</span>
+        </button>
         <span class="topbar-title">
             PSU Internalization
         </span>
@@ -108,20 +140,21 @@ $firstName = $_SESSION['first_name'] ?? 'Administrator';
 
 <?php
 
+
 switch ($page) {
 
     /* ========================================
-       DASHBOARD
+    DASHBOARD
     ======================================== */
     case 'home':
         require 'reports.php';
         break;
 
     /* ========================================
-       MASTER DATA
+    PROGRAM MANAGEMENT
     ======================================== */
-    case 'countries':
-        require 'countries.php';
+    case 'countries_addresses':
+        require 'countries_addresses.php';
         break;
 
     case 'partners':
@@ -132,8 +165,12 @@ switch ($page) {
         require 'agreement_types.php';
         break;
 
+     case 'program_category':
+        require 'program_category.php';
+        break;
+
     /* ========================================
-       PROGRAM MANAGEMENT
+    PROGRAM MANAGEMENT
     ======================================== */
     case 'programs':
         require 'programs.php';
@@ -148,7 +185,7 @@ switch ($page) {
         break;
 
     /* ========================================
-       APPLICATION MANAGEMENT
+    APPLICATION MANAGEMENT
     ======================================== */
     case 'applications':
         require 'applications.php';
@@ -158,8 +195,11 @@ switch ($page) {
         require 'documents.php';
         break;
 
+    case 'program_requirements':
+        require 'program_requirements.php';
+        break;
     /* ========================================
-       STUDENT MOBILITY
+    STUDENT MOBILITY
     ======================================== */
     case 'student_management':
         require 'student_management.php';
@@ -169,10 +209,13 @@ switch ($page) {
         require 'travel_information.php';
         break;
 
-    case 'activity_monitoring':
-        require 'activity_monitoring.php';
+    case 'activity_reports':
+        require 'activity_reports.php';
         break;
 
+    case 'approved_students':
+        require 'approved_students.php';
+        break;
     /* ========================================
        COMMUNICATION
     ======================================== */
@@ -180,8 +223,8 @@ switch ($page) {
         require 'notifications.php';
         break;
 
-    case 'messages':
-        require 'messages.php';
+    case 'announcements':
+        require 'announcements.php';
         break;
 
     /* ========================================

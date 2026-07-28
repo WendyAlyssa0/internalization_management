@@ -1,418 +1,192 @@
-/* ==========================================================================
-   THEME TOKENS
-   ========================================================================== */
+/* ============================================================
+   notifications.css — Notifications Page
+   PSU Internalization Management System
+   ============================================================ */
+
+/* -------------------------
+   CSS CUSTOM PROPERTIES
+------------------------- */
 :root {
-    --brand-primary:     #0f1c2e;
-    --brand-secondary:   #1e293b;
-    --brand-accent:      #3b82f6;
-    --brand-accent-glow: rgba(59, 130, 246, 0.10);
+    --color-primary:        #0f2044;
+    --color-primary-light:  #1a3460;
+    --color-primary-hover:  #162c55;
+    --color-accent:         #2563eb;
+    --color-accent-hover:   #1d4ed8;
 
-    --surface-bg:   #f8fafc;
-    --surface-card: #ffffff;
-    --surface-muted:#f1f5f9;
+    --color-success:        #16a34a;
+    --color-success-bg:     #dcfce7;
+    --color-success-text:   #15803d;
 
-    --text-main:    #0f172a;
-    --text-muted:   #64748b;
-    --text-display: #475569;
-    --text-hint:    #94a3b8;
+    --color-warning:        #d97706;
+    --color-warning-bg:     #fef3c7;
+    --color-warning-text:   #b45309;
 
-    --border:        #e2e8f0;
-    --border-strong: #cbd5e1;
+    --color-error:          #dc2626;
+    --color-error-bg:       #fee2e2;
+    --color-error-text:     #b91c1c;
 
-    --intent-info-bg:     #eff6ff;
-    --intent-info-fg:     #1d4ed8;
-    --intent-success-bg:  #ecfdf5;
-    --intent-success-fg:  #065f46;
-    --intent-warning-bg:  #fff8e1;
-    --intent-warning-fg:  #78350f;
-    --intent-error-bg:    #fef2f2;
-    --intent-error-fg:    #991b1b;
+    --color-info:           #0ea5e9;
+    --color-info-bg:        #e0f2fe;
+    --color-info-text:      #0369a1;
 
-    --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 14px;
-    --radius-xl: 18px;
+    --color-bg:             #eef1f7;
+    --color-surface:        #ffffff;
+    --color-border:         #e2e8f0;
+    --color-border-focus:   #93c5fd;
 
-    --shadow-sm: 0 1px 3px rgba(15,23,42,0.04), 0 1px 2px rgba(15,23,42,0.03);
-    --shadow-md: 0 4px 6px -1px rgba(15,23,42,0.05), 0 2px 4px -2px rgba(15,23,42,0.04);
+    --color-text-primary:   #0f172a;
+    --color-text-secondary: #475569;
+    --color-text-muted:     #94a3b8;
+    --color-text-inverse:   #ffffff;
+
+    --radius-sm:  4px;
+    --radius-md:  8px;
+    --radius-lg:  12px;
+    --radius-xl:  16px;
+    --radius-full: 9999px;
+
+    --shadow-sm:  0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+    --shadow-md:  0 4px 12px rgba(0,0,0,.08);
+    --shadow-lg:  0 10px 30px rgba(0,0,0,.12);
+
+    --transition: 0.18s ease;
+    --font-sans:  'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
-/* ==========================================================================
-   RESET & BASE
-   ========================================================================== */
 *, *::before, *::after {
     box-sizing: border-box;
-    margin: 0;
-    padding: 0;
 }
 
-body {
-    background: var(--surface-bg);
-    font-family:'Oswald',sans-serif;    
-    color: var(--text-main);
-    line-height: 1.6;
-}
-
-/* ==========================================================================
-   LAYOUT
-   ========================================================================== */
+/* -------------------------
+   PAGE LAYOUT
+------------------------- */
 .content {
-    padding: 2rem 1.5rem;
-    max-width: 1200px;
+    padding: 32px 36px;
+    background: var(--color-bg);
+    min-height: 100vh;
+    font-family: var(--font-sans);
+    color: var(--color-text-primary);
+}
+
+/* -------------------------
+   NOTIFICATION CARD
+------------------------- */
+.notification-card {
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    max-width: 820px;
     margin: 0 auto;
 }
 
-/* ==========================================================================
-   PAGE HEADER
-   ========================================================================== */
-.page-header {
-    margin-bottom: 1.5rem;
-}
-
-.page-header h2 {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: var(--brand-primary);
-    letter-spacing: -0.01em;
-}
-
-.page-header p {
-    font-size: 0.875rem;
-    color: var(--text-muted);
-    margin-top: 2px;
-}
-
-/* ==========================================================================
-   TOOLBAR
-   ========================================================================== */
-.toolbar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 1.25rem;
-    flex-wrap: wrap;
-}
-
-.search-wrap {
-    position: relative;
-    flex: 1;
-    min-width: 240px;
-}
-
-.search-wrap i {
-    position: absolute;
-    left: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--text-hint);
-    font-size: 1rem;
-    pointer-events: none;
-}
-
-.search-wrap input {
-    width: 100%;
-    height: 40px;
-    padding: 0 12px 0 38px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--surface-card);
-    font-family: inherit;
-    font-size: 0.9rem;
-    color: var(--text-main);
-    outline: none;
-    transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.search-wrap input:focus {
-    border-color: var(--brand-accent);
-    box-shadow: 0 0 0 3px var(--brand-accent-glow);
-}
-
-.search-wrap input::placeholder {
-    color: var(--text-hint);
-}
-
-.filter-select {
-    height: 40px;
-    padding: 0 30px 0 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    font-family: inherit;
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: var(--text-muted);
-    background: var(--surface-card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8' stroke-width='2'%3E%3Cpath d='M19 9l-7 7-7-7'/%3E%3C/svg%3E") no-repeat right 10px center / 14px;
-    appearance: none;
-    outline: none;
-    cursor: pointer;
-    transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.filter-select:focus {
-    border-color: var(--brand-accent);
-    box-shadow: 0 0 0 3px var(--brand-accent-glow);
-}
-
-.create-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 40px;
-    padding: 0 1.25rem;
-    background: var(--brand-primary);
-    color: #fff;
-    border-radius: var(--radius-md);
-    font-family: inherit;
-    font-size: 0.875rem;
-    font-weight: 600;
-    text-decoration: none;
-    border: none;
-    cursor: pointer;
-    transition: background 0.15s, transform 0.15s;
-}
-
-.create-btn:hover {
-    background: var(--brand-secondary);
-    color: #fff;
-    transform: translateY(-1px);
-}
-
-/* ==========================================================================
-   TABLE CARD
-   ========================================================================== */
-.table-card {
-    background: var(--surface-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-xl);
-    overflow: hidden;
-}
-
-table {
-    width: 100%;
-    border-collapse: collapse;
-    text-align: left;
-    font-size: 0.9rem;
-}
-
-thead th {
-    background: var(--surface-muted);
-    color: var(--text-muted);
-    font-size: 0.725rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    padding: 1rem 1.5rem;
-    border-bottom: 1px solid var(--border);
-}
-
-tbody tr {
-    border-bottom: 1px solid var(--surface-muted);
-    transition: background 0.1s;
-}
-
-tbody tr:hover {
-    background: var(--surface-bg);
-}
-
-tbody tr:last-child {
-    border-bottom: none;
-}
-
-tbody td {
-    padding: 1.125rem 1.5rem;
-    vertical-align: middle;
-}
-
-.id-cell   { color: var(--text-hint);     font-size: 0.825rem; font-weight: 500; }
-.name-cell { color: var(--brand-primary); font-weight: 600; }
-.date-cell { color: var(--text-muted);    font-size: 0.825rem; }
-
-/* ==========================================================================
-   BADGES & STATUS PILLS
-   ========================================================================== */
-.badge {
-    display: inline-block;
-    padding: 3px 9px;
-    border-radius: 5px;
-    font-size: 0.725rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-}
-
-.badge-admin      { background: var(--intent-info-bg);    color: #1e40af; }
-.badge-applicant  { background: var(--intent-success-bg); color: var(--intent-success-fg); }
-.badge-superadmin { background: #f5f3ff;                  color: #5b21b6; }
-
-.status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 3px 10px;
-    border-radius: 99px;
-    font-size: 0.75rem;
-    font-weight: 600;
-}
-
-.status-badge::before {
-    content: '';
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    display: inline-block;
-    flex-shrink: 0;
-}
-
-.status-active::before   { background: #10b981; }
-.status-inactive::before { background: #ef4444; }
-.status-pending::before  { background: #f59e0b; }
-.status-review::before   { background: #3b82f6; }
-.status-approved::before { background: #10b981; }
-.status-rejected::before { background: #ef4444; }
-
-.status-active   { background: var(--intent-success-bg); color: var(--intent-success-fg); }
-.status-inactive { background: var(--intent-error-bg);   color: var(--intent-error-fg); }
-.status-pending  { background: var(--intent-warning-bg); color: var(--intent-warning-fg); }
-.status-review   { background: var(--intent-info-bg);    color: var(--intent-info-fg); }
-.status-approved { background: var(--intent-success-bg); color: var(--intent-success-fg); }
-.status-rejected { background: var(--intent-error-bg);   color: var(--intent-error-fg); }
-
-/* ==========================================================================
-   ACTION BUTTONS
-   ========================================================================== */
-.actions {
-    display: flex;
-    gap: 6px;
-}
-
-.action-btn {
-    width: 32px;
-    height: 32px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: var(--surface-card);
-    color: var(--text-muted);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    text-decoration: none;
-    cursor: pointer;
-    font-size: 0.9rem;
-    transition: all 0.15s;
-}
-
-.action-btn.edit:hover {
-    background: var(--intent-info-bg);
-    border-color: #bfdbfe;
-    color: var(--intent-info-fg);
-    transform: translateY(-1px);
-}
-
-.action-btn.del:hover {
-    background: var(--intent-error-bg);
-    border-color: #fecaca;
-    color: var(--intent-error-fg);
-    transform: translateY(-1px);
-}
-
-/* ==========================================================================
-   NOTIFICATION CARD
-   ========================================================================== */
-.notification-card {
-    background: var(--surface-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-xl);
-    overflow: hidden;
-    box-shadow: var(--shadow-sm);
-}
-
-/* -- Header -- */
+/* -------------------------
+   HEADER
+------------------------- */
 .notification-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--border);
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--color-border);
+    flex-wrap: wrap;
+    gap: 12px;
 }
 
 .notification-header h3 {
-    font-size: 0.9375rem;
-    font-weight: 600;
-    color: var(--brand-primary);
     display: flex;
     align-items: center;
     gap: 8px;
-    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin: 0 0 2px;
 }
 
 .notification-header h3 i {
-    font-size: 1rem;
-    color: var(--text-muted);
+    color: var(--color-accent);
+    font-size: 1.2rem;
 }
 
 .notification-header p {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    margin-top: 2px;
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+    margin: 0;
 }
 
 .notification-badge {
-    font-size: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    background: var(--color-error);
+    color: white;
+    border-radius: var(--radius-full);
+    font-size: 0.76rem;
     font-weight: 600;
-    background: var(--intent-info-bg);
-    color: var(--intent-info-fg);
-    padding: 3px 10px;
-    border-radius: 99px;
     white-space: nowrap;
+    animation: pulse 2s ease-in-out infinite;
 }
 
-/* -- Filter tabs -- */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.75; }
+}
+
+/* -------------------------
+   FILTERS
+------------------------- */
 .notification-filters {
     display: flex;
-    gap: 4px;
-    padding: 0.625rem 1.25rem;
-    border-bottom: 1px solid var(--border);
+    align-items: center;
+    gap: 6px;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--color-border);
     flex-wrap: wrap;
+    background: #fafbfc;
 }
 
 .notification-filters button {
-    font-family: inherit;
-    font-size: 0.8125rem;
-    padding: 4px 14px;
-    border-radius: 99px;
-    border: 1px solid transparent;
-    background: transparent;
-    color: var(--text-muted);
+    padding: 6px 14px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    font-size: 0.8rem;
+    font-weight: 500;
+    font-family: var(--font-sans);
+    color: var(--color-text-secondary);
     cursor: pointer;
-    transition: all 0.1s;
+    transition: background var(--transition), color var(--transition), border-color var(--transition);
 }
 
 .notification-filters button:hover {
-    background: var(--surface-muted);
-    color: var(--text-main);
+    background: var(--color-bg);
+    border-color: #cbd5e1;
 }
 
 .notification-filters button.active {
-    background: var(--surface-muted);
-    border-color: var(--border-strong);
-    color: var(--text-main);
-    font-weight: 600;
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+    box-shadow: var(--shadow-sm);
 }
 
-/* -- List -- */
+/* -------------------------
+   NOTIFICATION LIST
+------------------------- */
 .notification-list {
-    display: flex;
-    flex-direction: column;
-    list-style: none;
+    max-height: 600px;
+    overflow-y: auto;
 }
 
 .notification-item {
     display: flex;
     align-items: flex-start;
-    gap: 12px;
-    padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--surface-muted);
+    gap: 14px;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--color-border);
     cursor: pointer;
-    transition: background 0.1s;
+    transition: background var(--transition);
     position: relative;
 }
 
@@ -421,231 +195,239 @@ tbody td {
 }
 
 .notification-item:hover {
-    background: var(--surface-bg);
+    background: #f8fafc;
 }
 
-/* Unread accent — blue by default */
 .notification-item.unread {
-    border-left: 3px solid var(--brand-accent);
-    padding-left: calc(1.25rem - 1px);
-    background: #f8fbff;
+    background: #eff6ff;
 }
 
-/* Admin-specific: new submission = blue */
-.notification-item.application.unread {
-    border-left-color: var(--brand-accent);
-    background: #f8fbff;
+.notification-item.unread:hover {
+    background: #e0f0ff;
 }
 
-/* -- Unread dot -- */
+/* Unread dot */
 .unread-dot {
-    width: 7px;
-    height: 7px;
-    min-width: 7px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
-    background: var(--brand-accent);
-    margin-top: 14px;
+    background: var(--color-accent);
     flex-shrink: 0;
-    transition: opacity 0.3s;
+    margin-top: 6px;
 }
 
-/* -- Icon -- */
+.notification-item:not(.unread) .unread-dot {
+    background: transparent;
+}
+
+/* Icon */
 .notification-icon {
-    width: 36px;
-    height: 36px;
-    min-width: 36px;
+    width: 40px;
+    height: 40px;
     border-radius: var(--radius-md);
+    background: var(--color-info-bg);
+    color: var(--color-info-text);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1rem;
+    font-size: 1.1rem;
     flex-shrink: 0;
-    background: var(--intent-info-bg);
-    color: var(--intent-info-fg);
 }
 
-/* -- Content -- */
+.notification-item.unread .notification-icon {
+    background: var(--color-primary);
+    color: white;
+}
+
+/* Content */
 .notification-content {
     flex: 1;
     min-width: 0;
 }
 
 .notification-label {
-    font-size: 0.6875rem;
+    display: inline-block;
+    font-size: 0.7rem;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-hint);
-    margin-bottom: 2px;
+    letter-spacing: 0.5px;
+    color: var(--color-text-muted);
+    margin-bottom: 3px;
 }
 
-.notification-name {
+.notification-title {
     font-size: 0.875rem;
     font-weight: 600;
-    color: var(--text-main);
-    margin-bottom: 1px;
+    color: var(--color-text-primary);
+    margin-bottom: 3px;
 }
 
 .notification-message {
-    font-size: 0.875rem;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+    line-height: 1.5;
+    margin-bottom: 6px;
 }
 
 .notification-time {
-    margin-top: 5px;
-    font-size: 0.75rem;
-    color: var(--text-hint);
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
 }
 
 .notification-time i {
-    font-size: 0.75rem;
+    font-size: 0.85rem;
 }
 
-/* -- Footer -- */
+/* -------------------------
+   EMPTY STATE
+------------------------- */
+.notification-empty {
+    text-align: center;
+    padding: 72px 32px;
+}
+
+.notification-empty-icon {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: var(--color-info-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px;
+}
+
+.notification-empty-icon i {
+    font-size: 2.2rem;
+    color: var(--color-info);
+}
+
+.notification-empty h3 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin: 0 0 6px;
+}
+
+.notification-empty p {
+    font-size: 0.875rem;
+    color: var(--color-text-muted);
+    margin: 0;
+}
+
+/* -------------------------
+   FOOTER
+------------------------- */
 .notification-footer {
     display: flex;
+    align-items: center;
     justify-content: space-between;
+    padding: 16px 24px;
+    border-top: 1px solid var(--color-border);
+    flex-wrap: wrap;
+    gap: 12px;
+    background: #fafbfc;
+}
+
+.notification-footer > span {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+}
+
+.notification-footer > button {
+    display: flex;
     align-items: center;
-    padding: 0.75rem 1.25rem;
-    background: var(--surface-muted);
-    border-top: 1px solid var(--border);
-}
-
-.notification-footer span {
-    font-size: 0.8125rem;
-    color: var(--text-muted);
-}
-
-.mark-read-btn {
-    font-family: inherit;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    background: none;
-    border: 1px solid var(--border-strong);
-    padding: 5px 14px;
+    gap: 6px;
+    padding: 7px 16px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
-    color: var(--intent-info-fg);
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-family: var(--font-sans);
+    color: var(--color-text-secondary);
     cursor: pointer;
-    transition: all 0.15s;
+    transition: background var(--transition), border-color var(--transition);
 }
 
-.mark-read-btn:hover {
-    background: var(--intent-info-bg);
-    border-color: #bfdbfe;
+.notification-footer > button:hover {
+    background: var(--color-bg);
+    border-color: #cbd5e1;
 }
 
-.mark-read-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-/* ==========================================================================
-   ALERTS
-   ========================================================================== */
-.alert {
+/* -------------------------
+   TOAST NOTIFICATION
+------------------------- */
+.toast {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    z-index: 2000;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 0.75rem 1rem;
+    gap: 10px;
+    padding: 14px 20px;
     border-radius: var(--radius-md);
     font-size: 0.875rem;
-    margin-bottom: 1rem;
-}
-
-.alert.success { background: var(--intent-success-bg); color: var(--intent-success-fg); }
-.alert.error   { background: var(--intent-error-bg);   color: var(--intent-error-fg); }
-
-/* ==========================================================================
-   EMPTY STATE
-   ========================================================================== */
-.empty-state,
-.notification-empty {
-    padding: 3rem 1.5rem;
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 0.875rem;
-    line-height: 1.7;
-}
-
-.empty-state i,
-.notification-empty i {
-    font-size: 1.75rem;
-    color: var(--text-hint);
-    display: block;
-    margin-bottom: 10px;
-}
-
-.empty-state p { font-size: 0.875rem; margin: 0; }
-
-.empty-row td {
-    text-align: center;
-    padding: 4rem 2rem;
-    color: var(--text-muted);
-}
-
-/* ==========================================================================
-   TOAST
-   ========================================================================== */
-#toast-container {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    z-index: 9999;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.toast {
-    padding: 10px 16px;
-    border-radius: var(--radius-md);
-    font-size: 0.8125rem;
     font-weight: 500;
-    color: var(--intent-info-fg);
-    background: var(--intent-info-bg);
-    border: 1px solid #bfdbfe;
+    font-family: var(--font-sans);
+    box-shadow: var(--shadow-lg);
+    min-width: 260px;
+    max-width: 380px;
+    transform: translateY(12px);
+    opacity: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    pointer-events: none;
+}
+
+.toast--show {
     opacity: 1;
-    transition: opacity 0.3s;
-    box-shadow: var(--shadow-md);
-    max-width: 320px;
+    transform: translateY(0);
 }
 
-.toast.error {
-    background: var(--intent-error-bg);
-    border-color: #fecaca;
-    color: var(--intent-error-fg);
+.toast--success {
+    background: var(--color-primary);
+    color: white;
 }
 
-.toast.success {
-    background: var(--intent-success-bg);
-    border-color: #6ee7b7;
-    color: var(--intent-success-fg);
+.toast--error {
+    background: var(--color-error);
+    color: white;
 }
 
-/* ==========================================================================
+.toast i {
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+
+/* -------------------------
    RESPONSIVE
-   ========================================================================== */
-@media (max-width: 768px) {
-    .content { padding: 1.25rem 1rem; }
+------------------------- */
+@media (max-width: 900px) {
+    .content {
+        padding: 20px 16px;
+    }
+}
 
-    .toolbar {
+@media (max-width: 600px) {
+    .notification-header {
         flex-direction: column;
-        align-items: stretch;
+        align-items: flex-start;
     }
 
-    .search-wrap,
-    .filter-select,
-    .create-btn { width: 100%; }
+    .notification-filters {
+        padding: 12px 16px;
+    }
 
-    .table-card { overflow-x: auto; }
-    table { min-width: 720px; }
+    .notification-item {
+        padding: 14px 16px;
+    }
 
-    .notification-item { padding: 0.875rem 1rem; gap: 10px; }
-    .notification-filters { flex-wrap: wrap; }
+    .notification-footer {
+        flex-direction: column;
+        align-items: center;
+    }
 }

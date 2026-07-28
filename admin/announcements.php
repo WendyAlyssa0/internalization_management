@@ -15,7 +15,7 @@ ORDER BY publish_date DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
-<link rel="stylesheet" href="../asset/css/announcements.css">
+<link rel="stylesheet" href="../asset/css/announcement.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
 <div class="content">
