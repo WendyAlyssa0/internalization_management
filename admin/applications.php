@@ -23,6 +23,8 @@ $search     = trim($_GET['search'] ?? '');
 $program    = trim($_GET['program'] ?? '');
 $department = trim($_GET['department'] ?? '');
 $view       = $_GET['view'] ?? 'all';
+$sort       = $_GET['sort'] ?? 'created_at';
+$order      = strtoupper($_GET['order'] ?? 'DESC') === 'ASC' ? 'ASC' : 'DESC';
 
 /* =========================
    PAGINATION
@@ -30,6 +32,21 @@ $view       = $_GET['view'] ?? 'all';
 $limit  = 10;
 $page   = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
 $offset = ($page - 1) * $limit;
+
+/* =========================
+   ALLOWED SORT COLUMNS
+   (whitelist prevents SQL injection via ORDER BY)
+========================= */
+$allowedSort = [
+    'id'         => 'a.id',
+    'applicant'  => 'applicant_name',
+    'program'    => 'p.program_name',
+    'department' => 'p.program_type',
+    'status'     => 'p.status',
+    'country'    => 'p.country_id',
+    'created_at' => 'a.created_at',
+];
+$sortColumn = $allowedSort[$sort] ?? 'a.created_at';
 
 /* =========================
    WHERE BUILDER
@@ -40,37 +57,39 @@ $params = [];
 if ($search !== '') {
     $where .= " AND (
         a.id LIKE ? OR
-        a.program LIKE ? OR
-        a.department LIKE ? OR
-        CONCAT(u.first_name,' ',u.last_name) LIKE ?
+        p.program_name LIKE ? OR
+        p.program_type LIKE ? OR
+        CONCAT(u.first_name,' ',u.last_name) LIKE ? OR
+        u.email LIKE ?
     )";
     $like = "%$search%";
-    $params = array_merge($params, [$like, $like, $like, $like]);
+    $params = array_merge($params, [$like, $like, $like, $like, $like]);
 }
 
 if ($program !== '') {
-    $where .= " AND a.program = ?";
+    $where .= " AND p.program_name = ?";
     $params[] = $program;
 }
 
 if ($department !== '') {
-    $where .= " AND a.department = ?";
+    $where .= " AND p.program_type = ?";
     $params[] = $department;
 }
 
 if ($view === 'new') {
-    $where .= " AND a.status = 'pending'";
+    $where .= " AND p.status = 'pending'";
 } elseif ($view === 'review') {
-    $where .= " AND a.status = 'under evaluation'";
+    $where .= " AND p.status = 'under evaluation'";
 }
 
 /* =========================
-   COUNT QUERY (SAFE FIX)
+   COUNT QUERY
 ========================= */
 $countSql = "
     SELECT COUNT(*)
     FROM applications a
     LEFT JOIN users u ON a.applicant_id = u.id
+    LEFT JOIN programs p ON a.program_id = p.id
     $where
 ";
 
@@ -92,7 +111,7 @@ SELECT
 
     p.program_name AS program,
     p.program_type AS department,
-    p.country_id AS country,
+    p.country_id   AS country,
     p.status,
 
     CONCAT(u.first_name,' ',u.last_name) AS applicant_name,
@@ -108,7 +127,7 @@ LEFT JOIN programs p
 
 $where
 
-ORDER BY a.created_at DESC
+ORDER BY $sortColumn $order
 LIMIT $limit OFFSET $offset
 ";
 
@@ -116,7 +135,22 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $applications = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$totalPages = ceil($totalApplications / $limit);
+$totalPages = max(1, ceil($totalApplications / $limit));
+
+/* Helper: build a sort-aware column header */
+function sortHeader(string $label, string $col, string $sort, string $order): string {
+    $isActive = $sort === $col;
+    $nextOrder = ($isActive && $order === 'DESC') ? 'ASC' : 'DESC';
+    $icon = $isActive
+        ? ($order === 'DESC' ? 'fa-sort-down' : 'fa-sort-up')
+        : 'fa-sort';
+    $cls = $isActive ? 'sort-icon sort-icon--active' : 'sort-icon';
+    $url = http_build_query(array_merge($_GET, ['sort' => $col, 'order' => $nextOrder]));
+    return '<span class="th-inner">'
+        . '<a href="?' . h($url) . '" class="th-link">' . h($label) . '</a>'
+        . '<i class="fa ' . $cls . '"></i>'
+        . '</span>';
+}
 ?>
 
 <link rel="stylesheet" href="../asset/css/applications.css">
@@ -135,6 +169,8 @@ $totalPages = ceil($totalApplications / $limit);
             <i class="fa fa-search"></i>
             <input type="text"
                    id="searchInput"
+                   name="search"
+                   form="filterForm"
                    placeholder="Search applications..."
                    value="<?= h($search) ?>">
         </div>
@@ -147,8 +183,10 @@ $totalPages = ceil($totalApplications / $limit);
     </div>
 
     <!-- FILTERS -->
-    <form method="GET" class="filter-bar">
+    <form method="GET" class="filter-bar" id="filterForm">
         <input type="hidden" name="view" value="<?= h($view) ?>">
+        <input type="hidden" name="sort" value="<?= h($sort) ?>">
+        <input type="hidden" name="order" value="<?= h($order) ?>">
 
         <select name="program">
             <option value="">All Programs</option>
@@ -163,7 +201,7 @@ $totalPages = ceil($totalApplications / $limit);
             <option value="Business"    <?= $department === 'Business'    ? 'selected' : '' ?>>Business</option>
         </select>
 
-        <button type="submit">Filter</button>
+        <button type="submit"><i class="fa fa-filter"></i> Filter</button>
     </form>
 
     <!-- TABLE -->
@@ -171,34 +209,51 @@ $totalPages = ceil($totalApplications / $limit);
         <table class="table-card">
             <thead>
                 <tr>
-                    <th>ID</th>
-                    <th>Applicant</th>
-                    <th>Program</th>
-                    <th>Department</th>
-                    <th>Status</th>
-                    <th>Country</th>
-                    <th>Date</th>
+                    <th><?= sortHeader('ID', 'id', $sort, $order) ?></th>
+                    <th><?= sortHeader('Applicant', 'applicant', $sort, $order) ?></th>
+                    <th><?= sortHeader('Program', 'program', $sort, $order) ?></th>
+                    <th><?= sortHeader('Department', 'department', $sort, $order) ?></th>
+                    <th><?= sortHeader('Status', 'status', $sort, $order) ?></th>
+                    <th><?= sortHeader('Country', 'country', $sort, $order) ?></th>
+                    <th><?= sortHeader('Date', 'created_at', $sort, $order) ?></th>
                     <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
             <?php if ($applications): ?>
                 <?php foreach ($applications as $a): ?>
+                    <?php
+                        $initials = '';
+                        $parts = explode(' ', trim($a['applicant_name'] ?? ''));
+                        foreach ($parts as $p) {
+                            if ($p !== '') $initials .= strtoupper(substr($p, 0, 1));
+                            if (strlen($initials) >= 2) break;
+                        }
+                        $statusKey = strtolower(str_replace(' ', '-', $a['status'] ?? ''));
+                    ?>
                 <tr>
                     <td>#<?= h($a['id']) ?></td>
-                    <td><?= h($a['applicant_name']) ?></td>
+                    <td>
+                        <div class="applicant-cell">
+                            <div class="applicant-avatar"><?= h($initials ?: '?') ?></div>
+                            <div class="applicant-info">
+                                <strong><?= h($a['applicant_name']) ?></strong>
+                                <small><?= h($a['applicant_email']) ?></small>
+                            </div>
+                        </div>
+                    </td>
                     <td><?= h($a['program']) ?></td>
                     <td><?= h($a['department']) ?></td>
                     <td>
-                        <span class="status-badge status-<?= strtolower(str_replace(' ', '-', $a['status'])) ?>">
-                            <?= ucfirst($a['status']) ?>
+                        <span class="status-badge status-<?= h($statusKey) ?>">
+                            <?= h(ucfirst($a['status'] ?? '')) ?>
                         </span>
                     </td>
                     <td><?= h($a['country']) ?></td>
                     <td><?= date('M d, Y', strtotime($a['created_at'])) ?></td>
                     <td class="action-btns">
                         <button class="btn-view"
-                                onclick="openModal(<?= htmlspecialchars(json_encode($a), ENT_QUOTES) ?>)"
+                                onclick='openModal(<?= htmlspecialchars(json_encode($a), ENT_QUOTES) ?>)'
                                 title="View">
                             <i class="fa fa-eye"></i>
                         </button>
@@ -222,7 +277,19 @@ $totalPages = ceil($totalApplications / $limit);
                 <?php endforeach; ?>
             <?php else: ?>
                 <tr>
-                    <td colspan="8" class="empty-row">No applications found</td>
+                    <td colspan="8">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <polyline points="14 2 14 8 20 8"/>
+                                    <line x1="9" y1="15" x2="15" y2="15"/>
+                                </svg>
+                            </div>
+                            <h3>No applications found</h3>
+                            <p>Try adjusting your search or filters.</p>
+                        </div>
+                    </td>
                 </tr>
             <?php endif; ?>
             </tbody>
@@ -235,12 +302,32 @@ $totalPages = ceil($totalApplications / $limit);
             Showing <?= count($applications) ?> of <?= $totalApplications ?> applications
         </span>
         <div class="pages">
+            <?php
+                $baseQ = array_merge($_GET, []);
+                unset($baseQ['p']);
+            ?>
+            <?php if ($page > 1): ?>
+                <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>">
+                    <i class="fa fa-angle-left"></i>
+                </a>
+            <?php else: ?>
+                <button class="page-arrow" disabled><i class="fa fa-angle-left"></i></button>
+            <?php endif; ?>
+
             <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                <a href="?p=<?= $i ?>&view=<?= h($view) ?>&search=<?= urlencode($search) ?>&program=<?= urlencode($program) ?>&department=<?= urlencode($department) ?>"
+                <a href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $i]))) ?>"
                    class="<?= $i === $page ? 'active' : '' ?>">
                     <?= $i ?>
                 </a>
             <?php endfor; ?>
+
+            <?php if ($page < $totalPages): ?>
+                <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page + 1]))) ?>">
+                    <i class="fa fa-angle-right"></i>
+                </a>
+            <?php else: ?>
+                <button class="page-arrow" disabled><i class="fa fa-angle-right"></i></button>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -361,23 +448,17 @@ $totalPages = ceil($totalApplications / $limit);
 <!-- END #confirmModal -->
 
 <script>
-/* === DEBOUNCED SEARCH === */
 /* =====================================
-   SEARCH (DEBOUNCED)
+   SEARCH (DEBOUNCED) — submits filter form
 ===================================== */
 let searchTimer;
-
 const searchInput = document.getElementById('searchInput');
 
 if (searchInput) {
     searchInput.addEventListener('input', function () {
         clearTimeout(searchTimer);
-
         searchTimer = setTimeout(() => {
-            const url = new URL(window.location.href);
-            url.searchParams.set('search', this.value);
-            url.searchParams.set('p', '1');
-            window.location.href = url.toString();
+            document.getElementById('filterForm').submit();
         }, 400);
     });
 }
@@ -409,18 +490,18 @@ function openModal(data) {
             return `<span class="status-badge status-${cls}">${status}</span>`;
         };
 
-        document.getElementById('m-id').textContent          = '#' + fmt(data.id);
-        document.getElementById('m-name').textContent        = fmt(data.applicant_name);
-        document.getElementById('m-email').textContent       = fmt(data.applicant_email);
-        document.getElementById('m-program').textContent     = fmt(data.program);
-        document.getElementById('m-department').textContent  = fmt(data.department);
-        document.getElementById('m-mobility').textContent    = fmt(data.mobility_type);
-        document.getElementById('m-institution').textContent = fmt(data.institution);
-        document.getElementById('m-country').textContent     = fmt(data.country);
-        document.getElementById('m-status').innerHTML        = statusHtml(data.status);
-        document.getElementById('m-docs-status').innerHTML   = statusHtml(data.documents_status);
-        document.getElementById('m-created').textContent     = formatDate(data.created_at);
-        document.getElementById('m-reviewed').textContent    = formatDate(data.reviewed_at);
+        document.getElementById('m-id').textContent           = '#' + fmt(data.id);
+        document.getElementById('m-name').textContent         = fmt(data.applicant_name);
+        document.getElementById('m-email').textContent         = fmt(data.applicant_email);
+        document.getElementById('m-program').textContent       = fmt(data.program);
+        document.getElementById('m-department').textContent   = fmt(data.department);
+        document.getElementById('m-mobility').textContent     = fmt(data.mobility_type);
+        document.getElementById('m-institution').textContent  = fmt(data.institution);
+        document.getElementById('m-country').textContent       = fmt(data.country);
+        document.getElementById('m-status').innerHTML          = statusHtml(data.status);
+        document.getElementById('m-docs-status').innerHTML     = statusHtml(data.documents_status);
+        document.getElementById('m-created').textContent       = formatDate(data.created_at);
+        document.getElementById('m-reviewed').textContent      = formatDate(data.reviewed_at);
 
         document.getElementById('appModal').classList.add('open');
         document.body.style.overflow = 'hidden';
@@ -463,7 +544,7 @@ const actionConfig = {
     delete: {
         title: "Delete Application",
         message: "This action cannot be undone.",
-        icon: '<i class="fa fa-trash" style="color:#f59e0b;font-size:2.2rem;"></i>',
+        icon: '<i class="fa fa-trash" style="color:#d97706;font-size:2.2rem;"></i>',
         btnClass: "btn-confirm--delete",
         btnLabel: "Yes, Delete"
     }
@@ -523,13 +604,11 @@ function executeAction() {
         body: formData
     })
     .then(async (res) => {
-        const text = await res.text(); // IMPORTANT DEBUG STEP
-        console.log("RAW RESPONSE:", text);
-
+        const text = await res.text();
         try {
             return JSON.parse(text);
         } catch (e) {
-            throw new Error("Invalid JSON: " + text);
+            throw new Error("Invalid server response");
         }
     })
     .then(data => {
@@ -542,12 +621,15 @@ function executeAction() {
 
         if (data.success) {
             setTimeout(() => window.location.reload(), 1000);
+        } else {
+            btn.disabled = false;
+            btn.textContent = actionConfig[pendingAction]?.btnLabel || 'Confirm';
         }
     })
     .catch(err => {
         console.error(err);
         closeConfirm();
-        showToast('error', 'Server error. Check console.');
+        showToast('error', 'Server error. Please try again.');
     });
 }
 
@@ -563,12 +645,13 @@ function showToast(type, message) {
 
     toast.innerHTML = `
         <i class="fa fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
-        <span>${message}</span>
+        <span></span>
     `;
+    toast.querySelector('span').textContent = message;
 
     document.body.appendChild(toast);
 
-    setTimeout(() => toast.classList.add('toast--show'), 50);
+    requestAnimationFrame(() => toast.classList.add('toast--show'));
 
     setTimeout(() => {
         toast.classList.remove('toast--show');
@@ -585,28 +668,4 @@ document.addEventListener('keydown', function (e) {
         closeConfirm();
     }
 });
-
-document.getElementById('editProgramName').value =
-    data.programs_name || '';
-
-document.getElementById('editProgramType').value =
-    data.program_type || '';
-
-document.getElementById('editCountry').value =
-    data.country || '';
-
-document.getElementById('editStatus').value =
-    data.status || '';
-
-document.getElementById('editPartner').value =
-    data.partner_institution || '';
-
-document.getElementById('editStartDate').value =
-    data.start_date || '';
-
-document.getElementById('editEndDate').value =
-    data.end_date || '';
-
-document.getElementById('editDescription').value =
-    data.description || '';
 </script>

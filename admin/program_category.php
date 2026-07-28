@@ -9,17 +9,119 @@ if (!function_exists('h')) {
     }
 }
 
-$categories = $pdo->query("
+$limit  = 10;
+$page   = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
+$offset = ($page - 1) * $limit;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+
+    header('Content-Type: application/json');
+
+    $action = $_POST['action'];
+
+    try {
+
+        if ($action === 'add') {
+            $name = trim($_POST['category_name'] ?? '');
+            $desc = trim($_POST['description'] ?? '');
+
+            if ($name === '') {
+                echo json_encode(['ok' => false, 'error' => 'Category name is required.']);
+                exit;
+            }
+
+            $stmt = $pdo->prepare("
+                INSERT INTO program_category (category_name, description, status)
+                VALUES (:name, :description, 'active')
+            ");
+            $stmt->execute([
+                ':name'        => $name,
+                ':description' => $desc,
+            ]);
+
+            echo json_encode(['ok' => true, 'message' => 'Category added.']);
+            exit;
+        }
+
+        if ($action === 'edit') {
+            $id   = (int)($_POST['id'] ?? 0);
+            $name = trim($_POST['category_name'] ?? '');
+            $desc = trim($_POST['description'] ?? '');
+
+            if ($id <= 0) {
+                echo json_encode(['ok' => false, 'error' => 'Invalid category id.']);
+                exit;
+            }
+            if ($name === '') {
+                echo json_encode(['ok' => false, 'error' => 'Category name is required.']);
+                exit;
+            }
+
+            $stmt = $pdo->prepare("
+                UPDATE program_category
+                SET category_name = :name, description = :description
+                WHERE id = :id
+            ");
+            $stmt->execute([
+                ':name'        => $name,
+                ':description' => $desc,
+                ':id'          => $id,
+            ]);
+
+            echo json_encode(['ok' => true, 'message' => 'Category updated.']);
+            exit;
+        }
+
+        if ($action === 'delete') {
+            $id = (int)($_POST['id'] ?? 0);
+
+            if ($id <= 0) {
+                echo json_encode(['ok' => false, 'error' => 'Invalid category id.']);
+                exit;
+            }
+
+            $stmt = $pdo->prepare("DELETE FROM program_category WHERE id = :id");
+            $stmt->execute([':id' => $id]);
+
+            echo json_encode(['ok' => true, 'message' => 'Category deleted.']);
+            exit;
+        }
+
+        echo json_encode(['ok' => false, 'error' => 'Unknown action.']);
+        exit;
+
+    } catch (Throwable $e) {
+        error_log('program_category.php error: ' . $e->getMessage());
+        echo json_encode(['ok' => false, 'error' => 'A server error occurred. Please try again.']);
+        exit;
+    }
+}
+
+// Total number of categories
+$totalCategories = (int)$pdo->query("
+    SELECT COUNT(*) FROM program_category
+")->fetchColumn();
+
+// Total pages
+$totalPages = max(1, ceil($totalCategories / $limit));
+
+// Fetch only the current page
+$stmt = $pdo->prepare("
     SELECT *
     FROM program_category
     ORDER BY id DESC
-")->fetchAll(PDO::FETCH_ASSOC);
+    LIMIT :limit OFFSET :offset
+");
+
+$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+$stmt->execute();
+
+$categories = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <link rel="stylesheet" href="../asset/css/category.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-
-<div class="content">
 
     <div class="page-header">
         <h2>Program Category Management</h2>
@@ -103,9 +205,39 @@ $categories = $pdo->query("
             </tbody>
         </table>
 
+    <!-- PAGINATION -->
         <div class="pagination">
-            <span id="paginationSummary">Showing <?= count($categories) ?> category(s)</span>
-            <div class="pager" id="pagerNav"></div>
+            <span>
+                Showing <?= count($categories) ?> of <?= $totalCategories ?> categories
+            </span>
+            <div class="pages">
+                <?php
+                    $baseQ = array_merge($_GET, []);
+                    unset($baseQ['p']);
+                ?>
+                <?php if ($page > 1): ?>
+                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+                <?php else: ?>
+                    <button class="page-arrow" disabled><i class="fa fa-angle-left"></i></button>
+                <?php endif; ?>
+
+                <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                    <a href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $i]))) ?>"
+                    class="<?= $i === $page ? 'active' : '' ?>">
+                        <?= $i ?>
+                    </a>
+                <?php endfor; ?>
+
+                <?php if ($page < $totalPages): ?>
+                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page + 1]))) ?>">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+                <?php else: ?>
+                    <button class="page-arrow" disabled><i class="fa fa-angle-right"></i></button>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
 
@@ -179,230 +311,4 @@ $categories = $pdo->query("
     </div>
 </div>
 
-<script>
-/* ============================================================
-   SEARCH + PAGINATION
-============================================================ */
-const PAGE_SIZE = 6;
-
-const allRows          = Array.from(document.querySelectorAll("#tableBody tr[data-search]"));
-const pagerNav         = document.getElementById("pagerNav");
-const paginationSummary = document.getElementById("paginationSummary");
-const searchInput      = document.getElementById("searchInput");
-
-let currentPage = 1;
-
-function getFilteredRows() {
-    const keyword = searchInput.value.toLowerCase();
-    return allRows.filter(row => (row.dataset.search || "").includes(keyword));
-}
-
-function renderTable() {
-    const filtered  = getFilteredRows();
-    const total     = filtered.length;
-    const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
-    if (currentPage > pageCount) currentPage = pageCount;
-
-    allRows.forEach(row => row.style.display = "none");
-
-    const start = (currentPage - 1) * PAGE_SIZE;
-    const pageRows = filtered.slice(start, start + PAGE_SIZE);
-    pageRows.forEach(row => row.style.display = "");
-
-    if (total === 0) {
-        paginationSummary.textContent = "Showing 0 category(s)";
-    } else {
-        paginationSummary.textContent =
-            `Showing ${start + 1}–${Math.min(start + PAGE_SIZE, total)} of ${total} category(s)`;
-    }
-
-    renderPager(pageCount);
-}
-
-function renderPager(pageCount) {
-    pagerNav.innerHTML = "";
-
-    pagerNav.appendChild(makePagerBtn({
-        label: '<i class="fa-solid fa-chevron-left"></i>',
-        disabled: currentPage === 1,
-        onClick: () => goToPage(currentPage - 1),
-    }));
-
-    const pages = getPageList(currentPage, pageCount);
-    pages.forEach(p => {
-        if (p === "...") {
-            const span = document.createElement("span");
-            span.className = "pager-ellipsis";
-            span.textContent = "...";
-            pagerNav.appendChild(span);
-        } else {
-            pagerNav.appendChild(makePagerBtn({
-                label: String(p),
-                active: p === currentPage,
-                onClick: () => goToPage(p),
-            }));
-        }
-    });
-
-    pagerNav.appendChild(makePagerBtn({
-        label: '<i class="fa-solid fa-chevron-right"></i>',
-        disabled: currentPage === pageCount,
-        onClick: () => goToPage(currentPage + 1),
-    }));
-}
-
-function makePagerBtn({ label, active = false, disabled = false, onClick }) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "pager-btn" + (active ? " active" : "");
-    btn.innerHTML = label;
-    btn.disabled = disabled;
-    btn.addEventListener("click", onClick);
-    return btn;
-}
-
-function getPageList(current, total) {
-    if (total <= 7) {
-        return Array.from({ length: total }, (_, i) => i + 1);
-    }
-    const pages = [1];
-    if (current > 3) pages.push("...");
-    const start = Math.max(2, current - 1);
-    const end = Math.min(total - 1, current + 1);
-    for (let i = start; i <= end; i++) pages.push(i);
-    if (current < total - 2) pages.push("...");
-    pages.push(total);
-    return pages;
-}
-
-function goToPage(page) {
-    currentPage = page;
-    renderTable();
-}
-
-searchInput.addEventListener("input", function () {
-    currentPage = 1;
-    renderTable();
-});
-
-renderTable();
-
-/* ============================================================
-   MODAL
-============================================================ */
-const categoryModalOverlay = document.getElementById("categoryModalOverlay");
-const categoryForm         = document.getElementById("categoryForm");
-const categoryModalTitle   = document.getElementById("categoryModalTitle");
-const categoryModalSub     = document.getElementById("categoryModalSubtitle");
-const categorySubmitBtn    = document.getElementById("categorySubmitBtn");
-
-function toggleCategoryModal(open) {
-    categoryModalOverlay.classList.toggle("visible", open);
-    document.body.style.overflow = open ? "hidden" : "";
-}
-
-function openAddModal() {
-    categoryForm.reset();
-    document.getElementById("categoryId").value = "";
-    categoryModalTitle.textContent = "Add Category";
-    categoryModalSub.textContent = "Create a new program category";
-    toggleCategoryModal(true);
-}
-
-function openEditModal(id, row) {
-    if (typeof row === "string") {
-        try { row = JSON.parse(row); } catch { return; }
-    }
-    document.getElementById("categoryId").value = id;
-    document.getElementById("categoryName").value = row.category_name || "";
-    document.getElementById("categoryDescription").value = row.description || "";
-    categoryModalTitle.textContent = "Edit Category";
-    categoryModalSub.textContent = "Update this program category";
-    toggleCategoryModal(true);
-}
-
-function deleteCategory(id) {
-    if (confirm("Delete this category?")) {
-        window.location = "delete_program_category.php?id=" + id;
-    }
-}
-
-document.getElementById("categoryModalClose").addEventListener("click", () => toggleCategoryModal(false));
-document.getElementById("categoryModalCancel").addEventListener("click", () => toggleCategoryModal(false));
-categoryModalOverlay.addEventListener("click", function (e) {
-    if (e.target === categoryModalOverlay) toggleCategoryModal(false);
-});
-
-/* ============================================================
-   FORM SUBMIT (AJAX)
-============================================================ */
-categoryForm.addEventListener("submit", function (e) {
-    e.preventDefault();
-
-    const isEdit = document.getElementById("categoryId").value !== "";
-    const endpoint = isEdit ? "update_program_category.php" : "save_program_category.php";
-
-    const original = categorySubmitBtn.innerHTML;
-    categorySubmitBtn.disabled = true;
-    categorySubmitBtn.textContent = "Saving...";
-
-    fetch(endpoint, {
-        method: "POST",
-        body: new FormData(this)
-    })
-    .then(async res => {
-        const text = await res.text();
-        try {
-            return JSON.parse(text);
-        } catch {
-            throw new Error("Server did not return JSON");
-        }
-    })
-    .then(data => {
-        showToast(data.success ? "success" : "error", data.message || "Unknown response");
-        if (data.success) {
-            toggleCategoryModal(false);
-            setTimeout(() => location.reload(), 1000);
-        }
-    })
-    .catch(() => {
-        showToast("error", "Server error. Please try again.");
-    })
-    .finally(() => {
-        categorySubmitBtn.disabled = false;
-        categorySubmitBtn.innerHTML = original;
-    });
-});
-
-/* ============================================================
-   ESC KEY HANDLER
-============================================================ */
-document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") toggleCategoryModal(false);
-});
-
-/* ============================================================
-   TOAST NOTIFICATION
-============================================================ */
-function showToast(type, message) {
-    const existing = document.querySelector(".toast");
-    if (existing) existing.remove();
-
-    const toast = document.createElement("div");
-    toast.className = `toast toast--${type}`;
-    toast.innerHTML = `
-        <i class="fa fa-${type === "success" ? "check-circle" : "exclamation-circle"}"></i>
-        <span></span>
-    `;
-    toast.querySelector("span").textContent = message;
-
-    document.body.appendChild(toast);
-    requestAnimationFrame(() => toast.classList.add("toast--show"));
-
-    setTimeout(() => {
-        toast.classList.remove("toast--show");
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
-}
-</script>
+<script src="../asset/js/category.js"></script>

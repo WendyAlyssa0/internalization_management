@@ -12,6 +12,10 @@
    reserved for actionable/interactive moments. This pass
    brings that same language into the dashboard so the two
    screens feel like one product, not two separate kits.
+
+   RESPONSIVE NOTE: the sidebar toggle needs a tiny bit of JS
+   to flip classes (see the snippet + markup at the bottom of
+   this file's comments). Everything else here is pure CSS.
    ============================================================ */
 
 *, *::before, *::after {
@@ -66,7 +70,7 @@ html, body {
 }
 
 body {
-    font-family: 'Inter', sans-serif;
+    font-family: 'Oswald', sans-serif;
     background: var(--bg);
     color: var(--text);
     font-size: 14px;
@@ -83,7 +87,7 @@ ul {
 }
 
 button {
-    font-family: inherit;
+    font-family: 'Oswald', sans-serif;
 }
 
 /* Base image reset — without this, any <img> that isn't
@@ -120,10 +124,11 @@ img {
     background: linear-gradient(180deg, var(--navy) 0%, var(--navy) 55%, var(--navy-deep) 100%);
     display: flex;
     flex-direction: column;
-    z-index: 40;
+    z-index: 50;
     overflow-x: hidden;
     overflow-y: auto;
     scrollbar-width: thin;
+    transition: transform 0.25s ease;
 }
 
 .main-sidebar::-webkit-scrollbar {
@@ -139,12 +144,17 @@ img {
 .sidebar-header {
     padding: 24px 22px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
 }
 
 .brand {
     display: flex;
     align-items: center;
     gap: 12px;
+    min-width: 0;
 }
 
 .brand-logo {
@@ -161,13 +171,20 @@ img {
     outline-offset: 3px;
 }
 
+.brand-text {
+    min-width: 0;
+}
+
 .brand-text h4 {
-    font-family: 'Fraunces', serif;
+    font-family: 'Oswald', sans-serif;
     font-optical-sizing: auto;
     font-size: 16.5px;
     font-weight: 600;
     color: #fff;
     line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .brand-text small {
@@ -179,6 +196,27 @@ img {
     text-transform: uppercase;
     color: rgba(255, 255, 255, 0.45);
     margin-top: 2px;
+}
+
+/* close button, mobile-only (mirrors the hamburger's look) */
+.sidebar-close {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-close:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
 }
 
 /* nav list */
@@ -326,6 +364,50 @@ img {
     color: #fff;
 }
 
+/* dark backdrop behind the sidebar on small screens, click
+   to close. Hidden and non-interactive until the sidebar
+   is open. */
+.sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(7, 21, 48, 0.55);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+    z-index: 45;
+}
+
+.sidebar-overlay.visible {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* hamburger — lives in the topbar, hidden on desktop */
+.sidebar-toggle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--ink);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.sidebar-toggle:hover {
+    border-color: var(--blue);
+    color: var(--blue);
+    background: var(--info-bg);
+}
+
+.sidebar-toggle .material-symbols-outlined {
+    font-size: 22px;
+}
+
 /* ============================================================
    TOPBAR
    ============================================================ */
@@ -342,21 +424,26 @@ img {
     justify-content: space-between;
     padding: 0 28px;
     z-index: 30;
+    transition: left 0.25s ease;
 }
 
 .topbar-left {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 14px;
+    min-width: 0;
 }
 
 .topbar-title {
-    font-family: 'Fraunces', serif;
+    font-family: 'Oswald', sans-serif;
     font-optical-sizing: auto;
     font-size: 18px;
     font-weight: 600;
     color: var(--ink);
     letter-spacing: 0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .topbar .user {
@@ -370,6 +457,7 @@ img {
     border-radius: 999px;
     transition: background 0.15s ease;
     cursor: pointer;
+    flex-shrink: 0;
 }
 
 .topbar .user:hover {
@@ -381,6 +469,10 @@ img {
     color: var(--blue);
 }
 
+.topbar .user .user-name {
+    white-space: nowrap;
+}
+
 /* ============================================================
    MAIN CONTAINER
    ============================================================ */
@@ -389,6 +481,7 @@ img {
     margin-top: var(--topbar-h);
     padding: 28px 32px 60px;
     min-height: calc(100vh - var(--topbar-h));
+    transition: margin-left 0.25s ease;
 }
 
 /* page heading block used at the top of each section */
@@ -475,7 +568,7 @@ img {
 }
 
 .stat-card .stat-value {
-    font-family: 'Fraunces', serif;
+    font-family: 'Oswald', sans-serif;
     font-size: 30px;
     font-weight: 600;
     color: var(--ink);
@@ -510,12 +603,14 @@ img {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
     padding: 18px 22px;
     border-bottom: 1px solid var(--border);
 }
 
 .panel-header .panel-title {
-    font-family: 'Fraunces', serif;
+    font-family: 'Oswald', sans-serif;
     font-size: 16px;
     font-weight: 600;
     color: var(--ink);
@@ -530,6 +625,7 @@ img {
    ============================================================ */
 .table-wrap {
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 table.data-table {
@@ -805,6 +901,7 @@ table.data-table {
     gap: 6px;
     padding: 16px 22px;
     border-top: 1px solid var(--border);
+    flex-wrap: wrap;
 }
 
 .pagination button {
@@ -832,21 +929,52 @@ table.data-table {
 
 /* ============================================================
    RESPONSIVE
+
+   Breakpoints:
+   - 1200px  desktop sidebar narrows slightly, page padding tightens
+   - 1024px  sidebar narrows further (tablet landscape)
+   - 860px   sidebar becomes an off-canvas drawer + hamburger appears
+   - 640px   phones: tighter spacing, stat cards stack, tables scroll
+   - 400px   very small phones: minimal chrome
    ============================================================ */
+@media (max-width: 1200px) {
+    :root {
+        --sidebar-w: 236px;
+    }
+}
+
 @media (max-width: 1024px) {
     :root {
         --sidebar-w: 220px;
     }
+
+    .container {
+        padding: 24px 24px 50px;
+    }
 }
 
 @media (max-width: 860px) {
+    :root {
+        --sidebar-w: 272px;
+    }
+
+    /* sidebar becomes a fixed-width off-canvas drawer,
+       independent of the reflow above */
     .main-sidebar {
         transform: translateX(-100%);
-        transition: transform 0.2s ease;
+        box-shadow: 0 0 40px rgba(7, 21, 48, 0.35);
     }
 
     .main-sidebar.open {
         transform: translateX(0);
+    }
+
+    .sidebar-close {
+        display: inline-flex;
+    }
+
+    .sidebar-toggle {
+        display: inline-flex;
     }
 
     .topbar,
@@ -855,7 +983,83 @@ table.data-table {
         margin-left: 0;
     }
 
+    .topbar {
+        padding: 0 18px;
+    }
+
     .field-row {
         grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 640px) {
+    .topbar {
+        height: 60px;
+        padding: 0 14px;
+    }
+
+    :root {
+        --topbar-h: 60px;
+    }
+
+    .topbar-title {
+        font-size: 15.5px;
+    }
+
+    .topbar .user .user-name {
+        display: none;
+    }
+
+    .container {
+        padding: 18px 16px 40px;
+    }
+
+    .page-head {
+        margin-bottom: 18px;
+    }
+
+    .page-head .page-title {
+        font-size: 20px;
+    }
+
+    .stat-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+        margin-bottom: 20px;
+    }
+
+    .panel-header {
+        padding: 14px 16px;
+    }
+
+    .panel-body {
+        padding: 16px;
+    }
+
+    .pagination {
+        justify-content: center;
+        padding: 14px 16px;
+    }
+}
+
+@media (max-width: 400px) {
+    .main-sidebar {
+        width: 88vw;
+    }
+
+    .sidebar-header {
+        padding: 18px 16px;
+    }
+
+    .brand-text h4 {
+        font-size: 13px;
+    }
+
+    .stat-card {
+        padding: 16px 18px;
+    }
+
+    .stat-card .stat-value {
+        font-size: 25px;
     }
 }

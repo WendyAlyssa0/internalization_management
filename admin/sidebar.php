@@ -16,6 +16,7 @@ $menus = [
             'programs'         => ['icon' => 'fa-solid fa-book',           'label' => 'Programs'],
             'partners'         => ['icon' => 'fa-solid fa-building',       'label' => 'Partner Institutions'],
             'agreement_types'  => ['icon' => 'fa-solid fa-file-contract',  'label' => 'Agreement Types'],
+            'program_category' => ['icon' =>'fa-solid fa-layer-group',      'label' => 'Program Category'],
         ],
     ],
 
@@ -80,17 +81,28 @@ function openMenu(array $items, string $page): string
 }
 ?>
 
+<!-- dark backdrop, click to close on mobile. Lives outside the
+     sidebar itself (position: fixed, so DOM placement doesn't
+     matter for layout) but declared here so it always ships
+     alongside the sidebar markup -->
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
 <div class="main-sidebar" id="mainSidebar">
 
     <!-- LOGO -->
     <div class="sidebar-header">
         <div class="brand">
-            <img src="../asset/img/psu_logo.png" class="brand-logo" alt="PSU Logo">
             <div class="brand-text">
-                <h4>PSUxIZN</h4>
+                <h4>PSU Internationalization</h4>
                 <small>Admin Portal</small>
             </div>
         </div>
+        <!-- mobile-only close (X); the hamburger that opens this
+             lives in the topbar, not here, since the topbar is
+             the only thing still visible when the drawer is shut -->
+        <button class="sidebar-close" id="sidebarClose" aria-label="Close menu">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
     </div>
 
     <ul class="sidebar-menu">

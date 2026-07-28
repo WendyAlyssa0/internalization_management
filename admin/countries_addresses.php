@@ -8,6 +8,10 @@ if (session_status() === PHP_SESSION_NONE) {
 
 $pdo = db();
 
+$limit  = 10;
+$page   = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
+$offset = ($page - 1) * $limit;
+
 /* CSRF TOKEN */
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -23,6 +27,12 @@ function checkCsrf(): void {
     }
 }
 
+if (!function_exists('h')) {
+    function h($value): string {
+        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+    }
+}
+
 /* ===================================================
    AJAX ENDPOINTS (all POST, all CSRF-checked)
    =================================================== */
@@ -34,6 +44,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     if ($action === 'add' || $action === 'edit') {
         $country = trim((string)($_POST['country_name'] ?? ''));
+        $region    = trim((string)($_POST['region'] ?? ''));
+        $province    = trim((string)($_POST['province'] ?? ''));
         $city    = trim((string)($_POST['city'] ?? ''));
         $address = trim((string)($_POST['address'] ?? ''));
 
@@ -45,10 +57,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($action === 'add') {
             $stmt = $pdo->prepare("
                 INSERT INTO countries_addresses 
-                (country_name, city, street_address, status)
-                VALUES (?, ?, ?, 'active')
+                (country_name, region, province, city, street_address, status)
+                VALUES (?, ?, ?, ?, ?, 'active')
             ");
-            $stmt->execute([$country, $city, $address]);
+            $stmt->execute([$country, $region, $province, $city, $address]);
         } else {
             $id = (int)($_POST['id'] ?? 0);
             if ($id <= 0) {
@@ -57,10 +69,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             $stmt = $pdo->prepare("
                 UPDATE countries_addresses
-                SET country_name = ?, city = ?, street_address = ?
+                SET country_name = ?, 
+                region = ?, 
+                province = ?,
+                city = ?, 
+                street_address = ?
                 WHERE id = ?
             ");
-            $stmt->execute([$country, $city, $address, $id]);
+            $stmt->execute([$country, $region, $province, $city, $address, $id]);
         }
 
         echo json_encode(['ok' => true]);
@@ -111,22 +127,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 /* FETCH */
-$stmt = $pdo->query("SELECT * FROM countries_addresses ORDER BY id DESC");
-$countries  = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$totalCount = count($countries);
+$totalCount = (int)$pdo->query("
+    SELECT COUNT(*)
+    FROM countries_addresses
+")->fetchColumn();
+
+$totalPages = max(1, ceil($totalCount / $limit));
+
+$stmt = $pdo->prepare("
+    SELECT *
+    FROM countries_addresses
+    ORDER BY id DESC
+    LIMIT :limit OFFSET :offset
+");
+$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+$stmt->execute();
+
+$countries = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 <link rel="stylesheet" href="../asset/css/cmodal.css">
-
-<style>
-  .status-active        { background:#eef5ff; color:#1a56db; border-color:#c7dbff; }
-  .status-active:hover  { background:#1a56db; border-color:#1a56db; color:#fff; }
-  .status-inactive       { background:#fff5f5; color:#dc2626; border-color:#fecaca; }
-  .status-inactive:hover { background:#dc2626; border-color:#dc2626; color:#fff; }
-</style>
 
 <div class="content">
 
@@ -150,10 +174,11 @@ $totalCount = count($countries);
     <table id="countriesTable">
       <thead>
         <tr>
-          <th>ID</th>
           <th>Country</th>
+          <th>Region</th>
+          <th>Province</th>
           <th>City</th>
-          <th>Address</th>
+          <th>Street Address</th>
           <th>Status</th>
           <th>Action</th>
         </tr>
@@ -166,29 +191,40 @@ $totalCount = count($countries);
                   $status   = $row['status'] ?? 'Active';
                   $isActive = ($status === 'Active');
                 ?>
-                <tr data-id="<?= (int)$row['id'] ?>"
-                    data-search="<?= htmlspecialchars(strtolower($row['country_name'] . ' ' . $row['city'] . ' ' . $row['street_address'])) ?>">
+            <tr data-id="<?= (int)$row['id'] ?>"
+                data-search="<?= htmlspecialchars(strtolower($row['country_name'].' '.$row['region'].' '.$row['province'].' '.$row['city'].' '.$row['street_address'])) ?>">
+                <!-- Country -->
+                <td>
+                    <div class="country-cell">
+                        <div class="country-icon">
+                            <i class="fa fa-flag"></i>
+                        </div>
+                        <div class="country-info">
+                            <strong><?= htmlspecialchars($row['country_name']) ?></strong>
+                        </div>
+                    </div>
+                </td>
 
-                  <td class="id-cell">#<?= (int)$row['id'] ?></td>
+                <td><?= htmlspecialchars($row['region']) ?></td>
+                <td><?= htmlspecialchars($row['province']) ?></td>
+                <!-- City -->
+                <td><?= htmlspecialchars($row['city']) ?></td>
 
-                  <td class="name-cell"><?= htmlspecialchars($row['country_name']) ?></td>
-
-                  <td><?= htmlspecialchars($row['city']) ?></td>
-
-                  <td class="description-cell" title="<?= htmlspecialchars($row['street_address']) ?>">
+                <!-- Address -->
+                <td title="<?= htmlspecialchars($row['street_address']) ?>">
                     <?= htmlspecialchars($row['street_address']) ?>
-                  </td>
+                </td>
 
-                  <td>
-                    <button type="button"
-                            class="action-btn status-toggle <?= $isActive ? 'status-active' : 'status-inactive' ?>"
-                            style="width:auto;padding:0 10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;"
-                            data-id="<?= (int)$row['id'] ?>"
-                            data-status="<?= htmlspecialchars($status) ?>"
-                            title="Click to toggle status">
-                      <?= htmlspecialchars($status) ?>
+                <!-- Status -->
+                <td>
+                    <button
+                        type="button"
+                        class="status-badge status-toggle <?= $isActive ? 'status-active' : 'status-inactive' ?>"
+                        data-id="<?= (int)$row['id'] ?>"
+                        data-status="<?= htmlspecialchars($status) ?>">
+                        <?= htmlspecialchars($status) ?>
                     </button>
-                  </td>
+                </td>
 
                   <td>
                     <div class="actions">
@@ -197,7 +233,10 @@ $totalCount = count($countries);
                               title="Edit"
                               data-id="<?= (int)$row['id'] ?>"
                               data-country="<?= htmlspecialchars($row['country_name'], ENT_QUOTES) ?>"
+                              data-region="<?= htmlspecialchars($row['region'], ENT_QUOTES) ?>"
+                              data-province="<?= htmlspecialchars($row['province'], ENT_QUOTES) ?>"
                               data-city="<?= htmlspecialchars($row['city'], ENT_QUOTES) ?>"
+
                               data-address="<?= htmlspecialchars($row['street_address'], ENT_QUOTES) ?>">
                         <i class="fa-solid fa-pen"></i>
                       </button>
@@ -213,16 +252,58 @@ $totalCount = count($countries);
                 </tr>
               <?php endforeach; ?>
             <?php else: ?>
-              <tr class="empty-row">
-                <td colspan="6">No countries found</td>
+              <tr>
+                  <td colspan="5">
+                      <div class="empty-state">
+                          <div class="empty-state-icon">
+                              <i class="fa-solid fa-earth-americas"></i>
+                          </div>
+
+                          <h3>No Countries Found</h3>
+                          <p>No country and address records have been added yet.</p>
+                      </div>
+                  </td>
               </tr>
             <?php endif; ?>
 
           </tbody>
     </table>
 
-    <div class="pagination" id="paginationText">
-      Showing <?= $totalCount ?> countr<?= $totalCount === 1 ? 'y' : 'ies' ?>
+  <!-- PAGINATION -->
+          <div class="pagination">
+              <span>
+                  Showing <?= count($countries) ?> of <?= $totalCount ?> Countries Adreesses
+              </span>
+              <div class="pages">
+                  <?php
+                      $baseQ = array_merge($_GET, []);
+                      unset($baseQ['p']);
+                  ?>
+                  <?php if ($page > 1): ?>
+                      <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>">
+                          <i class="fa fa-angle-left"></i>
+                      </a>
+                  <?php else: ?>
+                      <button class="page-arrow" disabled><i class="fa fa-angle-left"></i></button>
+                  <?php endif; ?>
+
+                  <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                      <a href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $i]))) ?>"
+                      class="<?= $i === $page ? 'active' : '' ?>">
+                          <?= $i ?>
+                      </a>
+                  <?php endfor; ?>
+
+                  <?php if ($page < $totalPages): ?>
+                      <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page + 1]))) ?>">
+                          <i class="fa fa-angle-right"></i>
+                      </a>
+                  <?php else: ?>
+                      <button class="page-arrow" disabled><i class="fa fa-angle-right"></i></button>
+                  <?php endif; ?>
+              </div>
+          </div>
+
     </div>
   </div>
 
@@ -249,22 +330,43 @@ $totalCount = count($countries);
 
       <div class="modal-body">
         <div class="form-row">
+
           <div class="form-group">
             <label class="form-label" for="country_name">
               <i class="fa-solid fa-flag"></i> Country Name <span class="required">*</span>
             </label>
             <input type="text" id="country_name" name="country_name"
-                   class="form-input" placeholder="e.g. Japan"
-                   required maxlength="100">
+                  class="form-input" placeholder="e.g. Philippines"
+                  required maxlength="100">
           </div>
+
+          <div class="form-group">
+            <label class="form-label" for="region">
+              <i class="fa-solid fa-flag"></i> Region <span class="required">*</span>
+            </label>
+            <input type="text" id="region" name="region"
+                  class="form-input" placeholder="e.g. Metro Manila"
+                  required maxlength="100">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="province">
+              <i class="fa-solid fa-flag"></i> Province/State <span class="required">*</span>
+            </label>
+            <input type="text" id="province" name="province"
+                  class="form-input" placeholder="e.g. Pampanga"
+                  required maxlength="100">
+          </div>
+
           <div class="form-group">
             <label class="form-label" for="city">
-              <i class="fa-solid fa-city"></i> City
+              City
             </label>
             <input type="text" id="city" name="city"
-                   class="form-input" placeholder="e.g. Tokyo" maxlength="100">
+                  class="form-input" placeholder="e.g. Tokyo" maxlength="100">
           </div>
         </div>
+
         <div class="form-group">
           <label class="form-label" for="address">
             <i class="fa-solid fa-location-dot"></i> Address
@@ -272,7 +374,6 @@ $totalCount = count($countries);
           <textarea id="address" name="address" class="form-input"
                     placeholder="Full address…" maxlength="500"></textarea>
         </div>
-      </div>
 
       <div class="modal-footer">
         <button type="button" class="btn-secondary" id="modalCancel">Cancel</button>
