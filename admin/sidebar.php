@@ -44,12 +44,13 @@ $menus = [
         ],
     ],
 
-    'mobility_management' => [
-        'label' => 'Mobility Management',
+    'student_mobility' => [
+        'label' => 'Student Mobility',
         'items' => [
-            'approved_students'   => ['icon' => 'fa-solid fa-user-graduate', 'label' => 'Approved Students'],
-            'travel_information'  => ['icon' => 'fa-solid fa-passport',      'label' => 'Travel Information'],
-            'activity_reports'    => ['icon' => 'fa-solid fa-chart-line',    'label' => 'Activity Reports'],
+            'student_directory' => ['icon'      => 'fa-solid fa-users',            'label' => 'Student Directory'],
+            'approved_students' => ['icon'      => 'fa-solid fa-user-check',      'label' => 'Approved Students'],
+            'travel_information' => ['icon'     => 'fa-solid fa-passport',        'label' => 'Travel Information' ],
+            'activity_reports' => ['icon'       => 'fa-solid fa-chart-line',      'label' => 'Activity Reports'],
         ],
     ],
 

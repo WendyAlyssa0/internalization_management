@@ -31,48 +31,6 @@ function formatContactName(?string $first, ?string $mi, ?string $last): string {
 }
 
 /* =========================
-   OVPLIA DATASET
-========================= */
-$ovpliaData = [
-    "Vietnam" => [
-        "Vietnam National University (Hanoi)",
-        "Vietnam National University (Ho Chi Minh City)",
-        "University of Da Nang",
-        "Can Tho University"
-    ],
-    "Malaysia" => [
-        "University of Malaya (UM)",
-        "Universiti Teknologi Malaysia (UTM)",
-        "Universiti Kebangsaan Malaysia (UKM)",
-        "Universiti Sains Malaysia (USM)"
-    ],
-    "Indonesia" => [
-        "Universitas Gadjah Mada (UGM)",
-        "Universitas Indonesia (UI)",
-        "Institut Teknologi Bandung (ITB)",
-        "Universitas Brawijaya"
-    ],
-    "Thailand" => [
-        "Chulalongkorn University",
-        "Thammasat University",
-        "Kasetsart University",
-        "KMITL"
-    ],
-    "Japan" => [
-        "University of Tokyo",
-        "Kyoto University",
-        "Osaka University",
-        "Chiba University"
-    ],
-    "South Korea" => [
-        "Seoul National University",
-        "Korea University",
-        "Yonsei University",
-        "Hanyang University"
-    ]
-];
-
-/* =========================
    SAFE DELETE
 ========================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
@@ -88,6 +46,14 @@ $totalPartners = (int)$pdo->query("
 ")->fetchColumn();
 
 $totalPages = max(1, ceil($totalPartners / $limit));
+
+$countryStmt = $pdo->query("
+    SELECT id, country_name
+    FROM countries_addresses
+    WHERE status = 'active'
+    ORDER BY country_name
+");
+$countries = $countryStmt->fetchAll(PDO::FETCH_ASSOC);
 
 /* =========================
    FETCH PARTNERS
@@ -260,7 +226,7 @@ function expiryClass(?string $date): string {
 
     <!-- PAGINATION -->
         <div class="pagination">
-            <span>
+            <span id="paginationInfo">
                 Showing <?= count($partners) ?> of <?= $totalPartners ?> partners
             </span>
             <div class="pages">
@@ -320,18 +286,20 @@ function expiryClass(?string $date): string {
         <form id="addForm">
             <div class="modal-body">
 
-                <!-- Country + Institution (cascading) -->
+                <!-- Country + Institution -->
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">
                             <i class="fa fa-globe"></i> Country *
                         </label>
-                        <select name="country" id="addCountrySelect" class="form-input" required>
+                        <select name="country_id" id="addCountrySelect" class="form-input" required>
                             <option value="">Select Country</option>
-                            <?php foreach ($ovpliaData as $country => $institutions): ?>
-                                <option value="<?= h($country) ?>"><?= h($country) ?></option>
+                            <?php foreach ($countries as $country): ?>
+                                <option value="<?= (int)$country['id'] ?>">
+                                    <?= h($country['country_name']) ?>
+                                </option>
                             <?php endforeach; ?>
-                            <option value="__other__">Other (type manually)</option>
+                            <option value="__other__">Other (enter manually)</option>
                         </select>
                         <input type="text" name="country_manual" id="addCountryManual"
                                class="form-input" placeholder="Enter country name"
@@ -341,12 +309,8 @@ function expiryClass(?string $date): string {
                         <label class="form-label">
                             <i class="fa fa-building"></i> Institution Name *
                         </label>
-                        <select name="institution_name" id="addInstitutionSelect" class="form-input" required>
-                            <option value="">Select Country first</option>
-                        </select>
-                        <input type="text" name="institution_manual" id="addInstitutionManual"
-                               class="form-input" placeholder="Enter institution name"
-                               style="display:none;margin-top:8px">
+                        <input type="text" name="institution_name" id="addInstitution"
+                               class="form-input" placeholder="Enter Institution Name" required>
                     </div>
                 </div>
 
@@ -472,13 +436,21 @@ function expiryClass(?string $date): string {
                         <label class="form-label">
                             <i class="fa fa-globe"></i> Country *
                         </label>
-                        <input type="text" name="country" id="editCountry" class="form-input" required>
+                        <select id="editCountry" name="country_id" class="form-input" required>
+                            <option value="">Select Country</option>
+                            <?php foreach ($countries as $country): ?>
+                                <option value="<?= (int)$country['id'] ?>">
+                                    <?= h($country['country_name']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
                     </div>
                     <div class="form-group">
                         <label class="form-label">
                             <i class="fa fa-building"></i> Institution Name *
                         </label>
-                        <input type="text" name="institution_name" id="editInstitution" class="form-input" required>
+                        <input type="text" id="editInstitution" name="institution_name"
+                               class="form-input" placeholder="Enter Institution Name" required>
                     </div>
                 </div>
 
@@ -568,8 +540,6 @@ function expiryClass(?string $date): string {
 </div>
 
 <script>
-const ovpliaData = <?= json_encode($ovpliaData) ?>;
-
 /* ── Search ── */
 document.getElementById('searchInput').addEventListener('input', function () {
     const search  = this.value.toLowerCase().trim();
@@ -583,8 +553,10 @@ document.getElementById('searchInput').addEventListener('input', function () {
         if (show) visible++;
     });
 
-    document.getElementById('paginationInfo').innerText =
-        `Showing ${visible} partner(s)`;
+    const info = document.getElementById('paginationInfo');
+    if (info) {
+        info.innerText = `Showing ${visible} partner(s)`;
+    }
 });
 
 /* ── Modal helpers ── */
@@ -612,57 +584,17 @@ document.addEventListener('keydown', e => {
 /* ── ADD modal ── */
 function openAddModal() {
     document.getElementById('addForm').reset();
-    const inst = document.getElementById('addInstitutionSelect');
-    inst.innerHTML = '<option value="">Select Country first</option>';
-    inst.style.display = '';
-    document.getElementById('addInstitutionManual').style.display = 'none';
     document.getElementById('addCountryManual').style.display = 'none';
+    document.getElementById('addCountryManual').required = false;
     openModal('addModal');
 }
 
-/* Cascading country -> institution */
+/* Country select -> show manual entry when "Other" is chosen */
 document.getElementById('addCountrySelect').addEventListener('change', function () {
-    const country    = this.value;
-    const instSelect = document.getElementById('addInstitutionSelect');
-    const instManual = document.getElementById('addInstitutionManual');
-    const ctryManual = document.getElementById('addCountryManual');
-
-    ctryManual.style.display = country === '__other__' ? '' : 'none';
-    ctryManual.required      = country === '__other__';
-
-    instSelect.innerHTML = '<option value="">Select Institution</option>';
-    instManual.style.display = 'none';
-    instManual.required      = false;
-
-    if (!country || country === '__other__') {
-        instSelect.innerHTML = '<option value="">Enter manually below</option>';
-        instManual.style.display = '';
-        instManual.required      = true;
-        instSelect.style.display = 'none';
-        return;
-    }
-
-    instSelect.style.display = '';
-    if (ovpliaData[country]) {
-        ovpliaData[country].forEach(inst => {
-            const opt = document.createElement('option');
-            opt.value = inst;
-            opt.textContent = inst;
-            instSelect.appendChild(opt);
-        });
-    }
-
-    const other = document.createElement('option');
-    other.value = '__other__';
-    other.textContent = 'Other (type manually)';
-    instSelect.appendChild(other);
-});
-
-document.getElementById('addInstitutionSelect').addEventListener('change', function () {
-    const manual = document.getElementById('addInstitutionManual');
+    const manual = document.getElementById('addCountryManual');
     const isOther = this.value === '__other__';
     manual.style.display = isOther ? '' : 'none';
-    manual.required      = isOther;
+    manual.required = isOther;
 });
 
 /* ADD form submit */
@@ -689,7 +621,7 @@ function openEditModal(id) {
 
             document.getElementById('editId').value             = data.id;
             document.getElementById('editInstitution').value    = data.institution_name  || '';
-            document.getElementById('editCountry').value      = data.country           || '';
+            document.getElementById('editCountry').value      = data.country_id         || data.country           || '';
             document.getElementById('editContactFirst').value = data.contact_first_name || '';
             document.getElementById('editContactMi').value     = data.contact_mi        || '';
             document.getElementById('editContactLast').value  = data.contact_last_name || '';

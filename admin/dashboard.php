@@ -56,7 +56,7 @@ $validPages = [
     // Applications
     'applications',
     'documents',
-    'program_requirement',
+    'program_requirements',
 
     // Student Mobility
     'student_management',

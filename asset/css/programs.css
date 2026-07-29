@@ -189,7 +189,7 @@
 }
 
 .table-card thead {
-    background: var(--color-surface);
+    background: var(--color-primary);
     border-bottom: 1px solid var(--color-border);
 }
 
@@ -200,7 +200,7 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.6px;
-    color: var(--color-text-secondary);
+    color: var(--color-text-inverse);
     white-space: nowrap;
 }
 
@@ -461,9 +461,10 @@
     background: rgba(15,32,68,.45);
     backdrop-filter: blur(3px);
     z-index: 1000;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
-    padding: 20px;
+    padding: 40px 20px;
+    overflow-y: auto;
     animation: fadeIn 0.18s ease;
 }
 
@@ -482,7 +483,8 @@
     box-shadow: var(--shadow-modal);
     width: 100%;
     max-width: 640px;
-    max-height: 90vh;
+    max-height: calc(100vh - 80px);
+    margin: 0 auto;
     display: flex;
     flex-direction: column;
     animation: slideUp 0.22s ease;
@@ -527,7 +529,7 @@
     font-size: 1.1rem;
     font-weight: 700;
     color: var(--color-text-primary);
-    margin: 0 0 2px;
+    margin: 0 0 1px;
 }
 
 .modal-subtitle {
@@ -558,7 +560,7 @@
 
 /* Modal body */
 .modal-body {
-    padding: 24px;
+    padding: 22px;
     overflow-y: auto;
     flex: 1;
 }
@@ -640,17 +642,17 @@ input[type="date"].form-input {
 /* Textarea */
 textarea.form-input {
     resize: vertical;
-    min-height: 90px;
+    min-height: 85px;
     line-height: 1.5;
 }
 
 /* Modal footer */
 .modal-footer {
-    padding: 16px 24px;
+    padding: 16px 22px;
     border-top: 1px solid var(--color-border);
     display: flex;
     justify-content: flex-end;
-    gap: 10px;
+    gap: 8px;
     flex-shrink: 0;
     background: #fafafa;
 }

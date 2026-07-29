@@ -43,9 +43,9 @@ $where = "WHERE 1=1";
 $params = [];
 
 /* ROLE ACCESS */
-if ($role !== 'admin') {
-    $where .= " AND d.user_id = ?";
-    $params[] = $user_id;
+if (!in_array($role, ['admin', 'super admin'], true)) {
+    $where .= " AND d.user_id = :user_id";
+    $params[':user_id'] = $user_id;
 }
 
 /* SEARCH */
@@ -62,8 +62,8 @@ if ($search !== '') {
 
 /* TYPE FILTER */
 if ($type !== '') {
-    $where .= " AND LOWER(d.file_type) = LOWER(?)";
-    $params[] = $type;
+    $where .= " AND LOWER(d.file_type) = LOWER(:type)";
+    $params[':type'] = $type;
 }
 
 /* VIEW FILTER */
@@ -105,8 +105,8 @@ $sql = "
 ";
 
 $stmt = $pdo->prepare($sql);
-foreach ($params as $i => $val) {
-    $stmt->bindValue($i + 1, $val);
+foreach ($params as $key => $value) {
+    $stmt->bindValue($key, $value);
 }
 $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
 $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -118,8 +118,6 @@ $totalPages = max(1, ceil($totalDocs / $limit));
 
 <link rel="stylesheet" href="../asset/css/applications.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
-
-<div class="content">
 
 <div class="page-header">
     <h2>Document Management</h2>

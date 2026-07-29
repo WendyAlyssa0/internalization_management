@@ -45,7 +45,7 @@ function requireRole(array $roles, string $redirect = '/public/login.php'): void
  */
 function requireAdmin(): void
 {
-    requireRole(['admin', 'sa'], '/user/home.php');
+    requireRole(['admin', 'ad', 'super admin', 'sa'], '/user/home.php');
 }
 
 /**

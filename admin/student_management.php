@@ -26,37 +26,55 @@ $department = $_GET['department'] ?? '';
    BASE QUERY (APPROVED ONLY)
 ========================= */
 $sql = "
-    SELECT
-        a.id,
-        a.program,
-        a.department,
-        a.mobility_type,
-        a.institution,
-        a.country,
-        a.status,
-        a.reviewed_at,
-        a.created_at,
-        a.documents_status,
-        CONCAT(u.first_name,' ',u.last_name) AS student_name,
-        u.email AS student_email
-    FROM applications a
-    LEFT JOIN users u ON a.applicant_id = u.id
-    WHERE a.status = 'approved'
+SELECT
+    a.id,
+    p.program_name AS program,
+    a.department,
+    a.mobility_type,
+    a.institution,
+    a.country,
+    a.status,
+    a.reviewed_at,
+    a.created_at,
+    a.documents_status,
+
+    CONCAT(u.first_name,' ',u.last_name) AS student_name,
+    u.email AS student_email
+
+FROM applications a
+
+LEFT JOIN users u
+    ON a.applicant_id = u.id
+
+LEFT JOIN programs p
+    ON a.program_id = p.id
+
+WHERE a.status = 'approved'
 ";
 
 $params = [];
 
 if ($search !== '') {
+
     $sql .= " AND (
         CONCAT(u.first_name,' ',u.last_name) LIKE ?
-        OR a.program LIKE ?
+        OR p.program_name LIKE ?
         OR a.department LIKE ?
         OR a.mobility_type LIKE ?
         OR a.institution LIKE ?
         OR a.country LIKE ?
     )";
-    $like = "%$search%";
-    $params = array_merge($params, [$like,$like,$like,$like,$like,$like]);
+
+    $like = "%{$search}%";
+
+    $params = [
+        $like,
+        $like,
+        $like,
+        $like,
+        $like,
+        $like
+    ];
 }
 
 if ($department !== '') {

@@ -28,6 +28,15 @@ if (isset($_GET['delete'])) {
     exit();
 }
 
+/* LOAD PROGRAM CATEGORIES */
+$typeStmt = $pdo->query("
+    SELECT id, category_name
+    FROM program_category
+    WHERE status = 'Active'
+    ORDER BY category_name
+");
+$programTypes = $typeStmt->fetchAll(PDO::FETCH_ASSOC);
+
 /* LOAD PARTNERS */
 $partnerStmt = $pdo->query("
     SELECT id, institution_name
@@ -40,12 +49,11 @@ $partners = $partnerStmt->fetchAll(PDO::FETCH_ASSOC);
 /* LOAD COUNTRIES */
 $countryStmt = $pdo->query("
     SELECT id, country_name
-    FROM countries
-    WHERE status = 'Active'
+    FROM countries_addresses
+    WHERE status = 'active'
     ORDER BY country_name
 ");
 $countries = $countryStmt->fetchAll(PDO::FETCH_ASSOC);
-
 
 $totalPrograms = (int)$pdo->query("
     SELECT COUNT(*) FROM programs
@@ -128,7 +136,7 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <td><?= h($p['country_name']) ?></td>
                         <td><?= h($p['institution_name']) ?></td>
                         <td>
-                            <span class="status-badge <?= strtolower(h($p['status'])) ?>">
+                            <span class="status-badge status-<?= strtolower(h($p['status'])) ?>">
                                 <?= h($p['status']) ?>
                             </span>
                         </td>
@@ -243,11 +251,20 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <div class="form-row">
                     <div class="form-group">
                         <label>Program Type</label>
-                        <select name="program_type" id="edit_program_type" class="form-input" required>
-                            <option value="Student Mobility Programs">Student Mobility</option>
-                            <option value="Exchange Programs">Exchange</option>
-                            <option value="International Internships">Internship</option>
-                        </select>
+                            <select name="program_type"
+                                    id="edit_program_type"
+                                    class="form-input"
+                                    required>
+
+                                <option value="">Select Program Type</option>
+
+                                <?php foreach ($programTypes as $type): ?>
+                                    <option value="<?= h($type['category_name']) ?>">
+                                        <?= h($type['category_name']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+
+                            </select>
                     </div>
 
                     <div class="form-group">
@@ -264,25 +281,33 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <div class="form-row">
                     <div class="form-group">
                         <label>Partner Institution</label>
-                        <select name="partner_id" id="edit_partner_id" class="form-input" required>
-                            <option value="">Select Partner</option>
-                            <?php foreach ($partners as $partner): ?>
-                                <option value="<?= $partner['id'] ?>">
-                                    <?= h($partner['institution_name']) ?>
-                                </option>
-                            <?php endforeach; ?>
+
+                        <select name="partner_id"
+                                id="programPartner"
+                                class="form-input"
+                                required>
+
+                            <option value="">Select Country First</option>
+
                         </select>
                     </div>
 
                     <div class="form-group">
                         <label>Country</label>
-                        <select name="country_id" id="edit_country_id" class="form-input" required>
+
+                        <select name="country_id"
+                                id="programCountry"
+                                class="form-input"
+                                required>
+
                             <option value="">Select Country</option>
+
                             <?php foreach ($countries as $country): ?>
                                 <option value="<?= $country['id'] ?>">
                                     <?= h($country['country_name']) ?>
                                 </option>
                             <?php endforeach; ?>
+
                         </select>
                     </div>
                 </div>
@@ -355,13 +380,15 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <label class="form-label">
                             <i class="fa fa-tag"></i> Program Type
                         </label>
-                        <select name="program_type" class="form-input" required>
-                            <option value="">Select type...</option>
-                            <option value="Student Mobility Programs">Student Mobility</option>
-                            <option value="Exchange Programs">Exchange Programs</option>
-                            <option value="International Internships">International Internships</option>
-                        </select>
-                    </div>
+                            <select name="program_type" class="form-input" required>
+                                <option value="">Select Program Type</option>
+
+                                <?php foreach ($programTypes as $type): ?>
+                                    <option value="<?= h($type['category_name']) ?>">
+                                        <?= h($type['category_name']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
                     <div class="form-group">
                         <label class="form-label">
                             <i class="fa fa-circle-dot"></i> Status
@@ -462,7 +489,9 @@ document.getElementById('searchInput').addEventListener('input', function () {
    ADD PROGRAM MODAL
 ========================= */
 function openProgramModal() {
-    document.getElementById('programModal').classList.add('open');
+    const modal = document.getElementById('programModal');
+    document.body.appendChild(modal);          // NEW — escape any ancestor transform/filter
+    modal.classList.add('open');
     document.body.style.overflow = 'hidden';
 }
 
@@ -480,21 +509,28 @@ function closeProgramModalOutside(e) {
    EDIT PROGRAM MODAL
 ========================= */
 function openEditProgramModal(id) {
-    document.getElementById('editProgramModal').classList.add('open');
+    const modal = document.getElementById('editProgramModal');
+    document.body.appendChild(modal);          // NEW
+    modal.classList.add('open');
     document.body.style.overflow = 'hidden';
 
     fetch('get_program.php?id=' + id)
         .then(res => res.json())
         .then(data => {
-            document.getElementById('edit_id').value             = data.id;
-            document.getElementById('edit_program_name').value   = data.program_name;
-            document.getElementById('edit_program_type').value   = data.program_type;
-            document.getElementById('edit_status').value         = data.status;
-            document.getElementById('edit_partner_id').value     = data.partner_id;
-            document.getElementById('edit_country_id').value     = data.country_id;
-            document.getElementById('edit_start').value          = data.start_date;
-            document.getElementById('edit_end').value            = data.end_date;
-            document.getElementById('edit_description').value    = data.description;
+            document.getElementById('edit_id').value = data.id;
+            document.getElementById('edit_program_name').value = data.program_name;
+            document.getElementById('edit_program_type').value = data.program_type;
+            document.getElementById('edit_status').value = data.status;
+
+            // Select the country first
+            document.getElementById('edit_country_id').value = data.country_id;
+
+            // Load partners for that country
+            loadPartners(data.country_id, data.partner_id);
+
+            document.getElementById('edit_start').value = data.start_date;
+            document.getElementById('edit_end').value = data.end_date;
+            document.getElementById('edit_description').value = data.description;
         })
         .catch(() => {
             showToast('error', 'Cannot load program data');
@@ -511,6 +547,31 @@ function closeEditProgramOutside(e) {
     if (e.target.id === 'editProgramModal') closeEditProgramModal();
 }
 
+function loadPartners(countryId, selectedPartner = '') {
+
+    fetch('get_partners_by_country.php?country_id=' + countryId)
+        .then(res => res.json())
+        .then(partners => {
+
+            const select = document.getElementById('edit_partner_id');
+
+            select.innerHTML = '<option value="">Select Partner</option>';
+
+            partners.forEach(partner => {
+
+                const option = document.createElement('option');
+                option.value = partner.id;
+                option.textContent = partner.institution_name;
+
+                if (partner.id == selectedPartner) {
+                    option.selected = true;
+                }
+
+                select.appendChild(option);
+            });
+
+        });
+}
 /* =========================
    EDIT FORM SUBMIT
 ========================= */
@@ -550,6 +611,10 @@ document.getElementById('editProgramForm').addEventListener('submit', function(e
     });
 });
 
+document.getElementById('edit_country_id').addEventListener('change', function () {
+    loadPartners(this.value);
+});
+
 /* =========================
    ADD FORM SUBMIT
 ========================= */
@@ -587,6 +652,10 @@ document.getElementById('programForm').addEventListener('submit', function (e) {
         btn.disabled    = false;
         btn.innerHTML   = original;
     });
+});
+
+document.querySelector('[name="country_id"]').addEventListener('change', function () {
+    loadAddPartners(this.value);
 });
 
 /* =========================

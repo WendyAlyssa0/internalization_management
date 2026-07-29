@@ -78,153 +78,92 @@ $firstName = $_SESSION['first_name'] ?? 'User';
 
 <nav class="sidebar-nav">
 
-    <!-- HOME -->
-    <a href="?page=home"
-      class="<?= $page === 'home' ? 'active' : '' ?>">
-        <i class="fa-solid fa-house"></i>
-        Home
-    </a>
+<a href="?page=home" class="<?= $page==='home'?'active':'' ?>">
+    <i class="fa-solid fa-house"></i>
+    Home
+</a>
 
-    <!-- PROGRAMS -->
-    <div class="sidebar-dropdown <?= in_array($page, ['available_programs','apply_program']) ? 'open' : '' ?>">
+<div class="nav-title">Programs</div>
 
-        <div class="dropdown-toggle">
-            <span>
-                <i class="fa-solid fa-graduation-cap"></i>
-                Programs
-            </span>
-            <i class="fa-solid fa-chevron-down"></i>
-        </div>
+<a href="?page=available_programs" class="<?= $page==='available_programs'?'active':'' ?>">
+    <i class="fa-solid fa-book-open"></i>
+    Available Programs
+</a>
 
-        <div class="dropdown-menu">
+<a href="?page=apply_program" class="<?= $page==='apply_program'?'active':'' ?>">
+    <i class="fa-solid fa-file-circle-plus"></i>
+    Apply for a Program
+</a>
 
-        <a href="?page=available_programs" class="quick-link">
-            <i class="fa-solid fa-book-open"></i>
-            <div>
-                <div class="quick-link-label">Available Programs</div>
-                <div class="quick-link-sub">Browse opportunities</div>
-            </div>
-        </a>
+<div class="nav-title">Applications</div>
 
-            <a href="?page=apply_program"
-              class="<?= $page === 'apply_program' ? 'active' : '' ?>">
-                <i class="fa-solid fa-file-circle-plus"></i>
-                Apply Program
-            </a>
+<a href="?page=my_applications" class="<?= $page==='my_applications'?'active':'' ?>">
+    <i class="fa-solid fa-folder-open"></i>
+    My Applications
+</a>
 
-        </div>
-    </div>
+<div class="nav-title">Documents</div>
 
-    <!-- APPLICATIONS -->
-    <div class="sidebar-dropdown <?= in_array($page, ['my_applications']) ? 'open' : '' ?>">
+<a href="?page=upload_documents" class="<?= $page==='upload_documents'?'active':'' ?>">
+    <i class="fa-solid fa-upload"></i>
+    Upload Documents
+</a>
 
-        <div class="dropdown-toggle">
-            <span>
-                <i class="fa-solid fa-file-circle-check"></i>
-                Applications
-            </span>
-            <i class="fa-solid fa-chevron-down"></i>
-        </div>
+<div class="nav-title">Forms</div>
 
-        <div class="dropdown-menu">
+<a href="?page=online_forms" class="<?= $page==='online_forms'?'active':'' ?>">
+    <i class="fa-solid fa-pen-to-square"></i>
+    Fill-Up Forms
+</a>
 
-            <a href="?page=my_applications"
-              class="<?= $page === 'my_applications' ? 'active' : '' ?>">
-                <i class="fa-solid fa-folder-open"></i>
-                My Applications
-            </a>
+<a href="?page=download_forms" class="<?= $page==='download_forms'?'active':'' ?>">
+    <i class="fa-solid fa-download"></i>
+    Download Forms
+</a>
 
-        </div>
-    </div>
+<a href="?page=submitted_forms" class="<?= $page==='submitted_forms'?'active':'' ?>">
+    <i class="fa-solid fa-check-circle"></i>
+    Submitted Forms
+</a>
 
-    <!-- DOCUMENTS -->
-    <div class="sidebar-dropdown <?= in_array($page, ['upload_documents','download_forms']) ? 'open' : '' ?>">
+<div class="nav-title">Mobility</div>
 
-        <div class="dropdown-toggle">
-            <span>
-                <i class="fa-solid fa-folder"></i>
-                Documents
-            </span>
-            <i class="fa-solid fa-chevron-down"></i>
-        </div>
+<a href="?page=travel_info" class="<?= $page==='travel_info'?'active':'' ?>">
+    <i class="fa-solid fa-passport"></i>
+    Travel Information
+</a>
 
-        <div class="dropdown-menu">
+<a href="?page=activity_reports" class="<?= $page==='activity_reports'?'active':'' ?>">
+    <i class="fa-solid fa-chart-line"></i>
+    Activity Reports
+</a>
 
-            <a href="?page=upload_documents"
-              class="<?= $page === 'upload_documents' ? 'active' : '' ?>">
-                <i class="fa-solid fa-upload"></i>
-                Upload Documents
-            </a>
+<a href="?page=notifications" class="<?= $page==='notifications'?'active':'' ?>">
+    <i class="fa-solid fa-bell"></i>
+    Notifications
+</a>
 
-        </div>
-    </div>
+<div class="nav-title">Account</div>
 
-    <!-- FORMS -->
-<div class="sidebar-dropdown <?= in_array($page, ['online_forms','download_forms','submitted_forms']) ? 'open' : '' ?>">
+<a href="?page=profile" class="<?= $page==='profile'?'active':'' ?>">
+    <i class="fa-solid fa-user"></i>
+    Profile
+</a>
 
-    <div class="dropdown-toggle">
-        <span>
-            <i class="fa-solid fa-file-signature"></i>
-            Forms
-        </span>
-        <i class="fa-solid fa-chevron-down"></i>
-    </div>
+<a href="?page=change_password" class="<?= $page==='change_password'?'active':'' ?>">
+    <i class="fa-solid fa-key"></i>
+    Change Password
+</a>
 
-    <div class="dropdown-menu">
+<a href="?page=delete_account" class="<?= $page==='delete_account'?'active danger':'' ?>">
+    <i class="fa-solid fa-trash"></i>
+    Delete Account
+</a>
 
-        <a href="?page=online_forms"
-          class="<?= $page === 'online_forms' ? 'active' : '' ?>">
-            <i class="fa-solid fa-pen-to-square"></i>
-            Fill-Up Forms
-        </a>
-
-        <a href="?page=download_forms"
-          class="<?= $page === 'download_forms' ? 'active' : '' ?>">
-            <i class="fa-solid fa-download"></i>
-            Download Forms
-        </a>
-
-        <a href="?page=submitted_forms"
-          class="<?= $page === 'submitted_forms' ? 'active' : '' ?>">
-            <i class="fa-solid fa-check-circle"></i>
-            Submitted Forms
-        </a>
-
-    </div>
-</div>
-
-    <!-- MOBILITY -->
-    <div class="sidebar-dropdown <?= in_array($page, ['travel_info','activity_reports']) ? 'open' : '' ?>">
-
-        <div class="dropdown-toggle">
-            <span>
-                <i class="fa-solid fa-plane-departure"></i>
-                Mobility
-            </span>
-            <i class="fa-solid fa-chevron-down"></i>
-        </div>
-
-        <div class="dropdown-menu">
-
-            <a href="?page=travel_info"
-              class="<?= $page === 'travel_info' ? 'active' : '' ?>">
-                <i class="fa-solid fa-passport"></i>
-                Travel Information
-            </a>
-
-            <a href="?page=activity_reports"
-              class="<?= $page === 'activity_reports' ? 'active' : '' ?>">
-                <i class="fa-solid fa-chart-line"></i>
-                Activity Reports
-            </a>
-
-        </div>
-    </div>
-
-    <!-- PROFILE -->
-    <div class="sidebar-dropdown <?= in_array($page, ['profile','notifications','change_password']) ? 'open' : '' ?>">
-
-    </div>
+<a href="../public/user_logout.php" class="danger">
+    <i class="fa-solid fa-right-from-bracket"></i>
+    Logout
+</a>
 
 </nav>
 </aside>
@@ -239,16 +178,22 @@ $firstName = $_SESSION['first_name'] ?? 'User';
         <div class="topbar-sub">PSU Internationalization</div>
       </div>
 
-      <div class="topbar-right">
-        <div class="account-menu">
-          <div class="account-trigger">
-            <div class="account-avatar"><?= strtoupper(substr($firstName, 0, 1)) ?></div>
-            <div>
-              <div class="account-name"><?= htmlspecialchars($firstName) ?></div>
-              <div class="account-role">Applicant</div>
+        <div class="topbar-right">
+            <div class="user-info">
+                <div class="account-avatar">
+                    <?= strtoupper(substr($firstName,0,1)) ?>
+                </div>
+
+                <div>
+                    <div class="account-name">
+                        <?= htmlspecialchars($firstName) ?>
+                    </div>
+                    <div class="account-role">
+                        Applicant
+                    </div>
+                </div>
             </div>
-            <i class="fa-solid fa-chevron-down account-chevron"></i>
-          </div>
+        </div>
 
           <div class="dropdown">
             <div class="dropdown-header">
@@ -274,57 +219,6 @@ $firstName = $_SESSION['first_name'] ?? 'User';
 
     <!-- PAGE CONTENT -->
     <?php if ($page === 'home'): ?>
-
-    <div class="home-center">
-      <div class="welcome-card">
-
-        <div class="welcome-eyebrow">
-          <i class="fa-solid fa-globe"></i> Applicant Portal
-        </div>
-
-        <div class="welcome-title">
-          Welcome back,<br><?= htmlspecialchars($firstName) ?>
-        </div>
-
-        <div class="welcome-text">
-          Manage your international mobility applications, upload requirements, and track your status — all in one place.
-        </div>
-
-        <div class="welcome-divider"></div>
-
-        <div class="quick-links">
-          <a href="?page=my_applications" class="quick-link">
-            <i class="fa-solid fa-file-lines"></i>
-            <div>
-              <div class="quick-link-label">My Applications</div>
-              <div class="quick-link-sub">View &amp; track progress</div>
-            </div>
-          </a>
-          <a href="?page=upload_documents" class="quick-link">
-            <i class="fa-solid fa-folder-open"></i>
-            <div>
-              <div class="quick-link-label">Documents</div>
-              <div class="quick-link-sub">Upload requirements</div>
-            </div>
-          </a>
-          <a href="?page=apply_program" class="quick-link">
-            <i class="fa-solid fa-graduation-cap"></i>
-            <div>
-              <div class="quick-link-label">Apply for a Program</div>
-              <div class="quick-link-sub">Start a new application</div>
-            </div>
-          </a>
-              <a href="?page=travel_info" class="quick-link">
-                  <i class="fa-solid fa-passport"></i>
-                  <div>
-                      <div class="quick-link-label">Travel Information</div>
-                      <div class="quick-link-sub">Manage travel details</div>
-                  </div>
-              </a>
-        </div>
-
-      </div>
-    </div>
 
     <?php elseif ($page === 'apply_program'): ?>
       <div class="box"><?php include __DIR__ . '/apply_program.php'; ?></div>
