@@ -1,0 +1,208 @@
+﻿body { background-color: #f8f9fa; font-family: "DM Sans", system-ui, sans-serif; }
+
+    .req-wrapper {
+        max-width: 850px;
+        margin: 30px auto;
+        padding: 0 15px;
+    }
+
+    .page-header { margin-bottom: 24px; }
+    .page-header h2 { margin: 0 0 6px 0; color: #0E1C36; font-size: 26px; font-weight: 800; }
+    .page-header p { margin: 0; color: #64748b; font-size: 14px; }
+
+    /* Program Group Card */
+    .program-group {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        margin-bottom: 24px;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+    }
+
+    .program-group-header {
+        background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+        padding: 20px 24px;
+        border-bottom: 1px solid #e2e8f0;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 16px;
+    }
+
+    .program-title-block h3 {
+        margin: 0 0 6px;
+        font-size: 17px;
+        color: #0E1C36;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .program-title-block h3 i { color: #1a56db; font-size: 18px; }
+    
+    .program-meta {
+        display: flex;
+        gap: 16px;
+        font-size: 12px;
+        color: #64748b;
+    }
+    .program-meta span { display: inline-flex; align-items: center; gap: 4px; }
+
+    /* Progress Ring */
+    .progress-block {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: #fff;
+        padding: 10px 16px;
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        flex-shrink: 0;
+    }
+    .progress-ring {
+        width: 44px; height: 44px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font-size: 12px;
+        font-weight: 800;
+        color: #1a56db;
+        background: conic-gradient(#1a56db var(--p), #e2e8f0 0);
+        position: relative;
+    }
+    .progress-ring::before {
+        content: '';
+        position: absolute;
+        inset: 4px;
+        background: #fff;
+        border-radius: 50%;
+    }
+    .progress-ring span { position: relative; z-index: 1; }
+    
+    .progress-text strong { display: block; font-size: 13px; color: #0E1C36; }
+    .progress-text small { font-size: 11px; color: #64748b; }
+
+    /* Requirement List */
+    .req-list { display: flex; flex-direction: column; }
+
+    .req-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 18px 24px;
+        border-bottom: 1px solid #f1f5f9;
+        gap: 16px;
+        transition: background 0.2s;
+    }
+    .req-item:last-child { border-bottom: none; }
+    .req-item:hover { background: #f8fafc; }
+    .req-item.completed { background: #f0fdf4; }
+
+    .req-info {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex: 1;
+    }
+    .req-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: #1e293b;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .req-name i.ti-circle-check { color: #16a34a; }
+    
+    .req-sub {
+        font-size: 12px;
+        color: #64748b;
+        margin-left: 24px;
+    }
+
+    /* Badges & Buttons */
+    .req-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+    .badge-required {
+        background: #fee2e2; color: #991b1b;
+        font-size: 11px; font-weight: 700;
+        padding: 5px 10px; border-radius: 6px;
+        display: inline-flex; align-items: center; gap: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+    .badge-optional {
+        background: #f1f5f9; color: #64748b;
+        font-size: 11px; font-weight: 700;
+        padding: 5px 10px; border-radius: 6px;
+        display: inline-flex; align-items: center; gap: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+    .badge-uploaded {
+        background: #dcfce7; color: #166534;
+        font-size: 11px; font-weight: 700;
+        padding: 5px 10px; border-radius: 6px;
+        display: inline-flex; align-items: center; gap: 4px;
+    }
+
+    .btn-download, .btn-upload {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #fff;
+        border: 1px solid #cbd5e1;
+        color: #0E1C36;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 7px 12px;
+        border-radius: 6px;
+        text-decoration: none;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .btn-download:hover { background: #f8fafc; border-color: #94a3b8; }
+    .btn-upload { background: #1a56db; border-color: #1a56db; color: #fff; }
+    .btn-upload:hover { background: #1e429f; }
+
+    /* Empty State */
+    .empty-state {
+        background: #fff;
+        border: 2px dashed #cbd5e1;
+        border-radius: 16px;
+        padding: 60px 20px;
+        text-align: center;
+    }
+    .empty-state .empty-icon {
+        width: 64px; height: 64px;
+        background: #f1f5f9; color: #94a3b8;
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 32px; margin: 0 auto 16px;
+    }
+    .empty-state h3 { margin: 0 0 8px; color: #0E1C36; font-size: 18px; }
+    .empty-state p { margin: 0; color: #64748b; font-size: 14px; }
+
+    /* Upload Modal */
+    .modal-overlay {
+        display: none; position: fixed; inset: 0;
+        background: rgba(14, 28, 54, 0.6); backdrop-filter: blur(4px);
+        z-index: 9999; padding: 20px; align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-box {
+        background: #fff; border-radius: 16px; width: 100%; max-width: 480px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    .modal-header { padding: 20px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+    .modal-header h3 { margin: 0; font-size: 18px; color: #0E1C36; }
+    .modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #64748b; }
+    .modal-body { padding: 24px; }
+    .modal-body input[type="file"] {
+        width: 100%; padding: 10px; border: 2px dashed #cbd5e1; border-radius: 8px; cursor: pointer;
+    }
+    .modal-footer { padding: 16px 24px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 10px; }
+    .btn-cancel { padding: 10px 20px; border: 1px solid #e2e8f0; background: #fff; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    .btn-submit { padding: 10px 20px; border: none; background: #1a56db; color: #fff; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    .btn-submit:hover { background: #1e429f; }

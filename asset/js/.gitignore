@@ -1,0 +1,16 @@
+# MySQL database files
+*.frm
+*.ibd
+*.ibdata*
+*.ib_logfile*
+db.opt
+
+# Environment and sensitive files
+.env
+
+# Temporary files
+*.log
+*.tmp
+
+# XAMPP temporary files
+tmp/

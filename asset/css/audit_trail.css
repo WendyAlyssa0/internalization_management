@@ -1,0 +1,136 @@
+﻿.audit-page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-bottom: 24px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    .audit-page-header h2 { margin: 0 0 6px; font-size: 24px; color: #0E1C36; font-weight: 800; }
+    .audit-page-header p { margin: 0; color: #64748b; font-size: 14px; }
+
+    .audit-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        padding: 14px 18px;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        margin-bottom: 16px;
+    }
+    .audit-toolbar .search-wrap {
+        position: relative;
+        flex: 1;
+        min-width: 240px;
+    }
+    .audit-toolbar .search-wrap i {
+        position: absolute;
+        left: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #94a3b8;
+    }
+    .audit-toolbar .search-wrap input {
+        width: 100%;
+        padding: 10px 14px 10px 40px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        font-size: 13px;
+        outline: none;
+    }
+    .audit-toolbar .search-wrap input:focus {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+    .audit-toolbar select {
+        padding: 10px 14px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        font-size: 13px;
+        background: #fff;
+        outline: none;
+        cursor: pointer;
+        min-width: 130px;
+    }
+    .audit-toolbar button, .audit-toolbar a.btn-export {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 16px;
+        background: #1a56db;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+    }
+    .audit-toolbar button:hover, .audit-toolbar a.btn-export:hover { background: #1e429f; }
+
+    .role-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+    .role-super     { background: #f3e8ff; color: #6b21a8; }
+    .role-admin     { background: #dbeafe; color: #1e40af; }
+    .role-applicant { background: #e0f2fe; color: #0369a1; }
+    .role-faculty   { background: #fef3c7; color: #92400e; }
+    .role-system    { background: #f1f5f9; color: #64748b; }
+
+    .notification-meta-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: #64748b;
+        margin-top: 4px;
+        flex-wrap: wrap;
+    }
+
+    .audit-pagination {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 20px;
+        background: #f8fafc;
+        border-top: 1px solid #e2e8f0;
+        font-size: 13px;
+        color: #64748b;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .audit-pagination .pages { display: flex; gap: 6px; align-items: center; }
+    .audit-pagination .pages a,
+    .audit-pagination .pages button,
+    .audit-pagination .pages span.ellipsis {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 34px;
+        height: 34px;
+        padding: 0 10px;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        background: #fff;
+        color: #334155;
+        font-size: 13px;
+        font-weight: 600;
+        text-decoration: none;
+        cursor: pointer;
+    }
+    .audit-pagination .pages a:hover,
+    .audit-pagination .pages button:hover:not(:disabled) { background: #f1f5f9; }
+    .audit-pagination .pages a.active { background: #1a56db; color: #fff; border-color: #1a56db; }
+    .audit-pagination .pages button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .audit-pagination .pages span.ellipsis { border: none; background: transparent; cursor: default; }

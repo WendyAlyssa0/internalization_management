@@ -1,0 +1,88 @@
+﻿/* Modern filter bar */
+    .filter-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 20px;
+        padding: 16px 20px;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+    }
+    .filter-bar select,
+    .filter-bar .search-wrap input {
+        padding: 10px 14px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        font-size: 13px;
+        color: #1e293b;
+        background: #fff;
+        outline: none;
+    }
+    .filter-bar .search-wrap {
+        position: relative;
+        flex: 1;
+        min-width: 220px;
+    }
+    .filter-bar .search-wrap i {
+        position: absolute;
+        left: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #94a3b8;
+    }
+    .filter-bar .search-wrap input {
+        width: 100%;
+        padding-left: 40px;
+    }
+    .filter-bar button {
+        padding: 10px 20px;
+        background: #1a56db;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .filter-bar button:hover { background: #1e429f; }
+
+    /* Quick filter tabs */
+    .quick-filters {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 16px;
+    }
+    .quick-filters a {
+        padding: 8px 16px;
+        border-radius: 8px;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        font-size: 13px;
+        font-weight: 600;
+        color: #64748b;
+        text-decoration: none;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .quick-filters a:hover { background: #f8fafc; color: #0E1C36; }
+    .quick-filters a.active { background: #1a56db; color: #fff; border-color: #1a56db; }
+    .quick-filters a.active i { color: #fff; }
+
+    /* File type badges */
+    .file-type-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+    .file-type-PDF { background: #fee2e2; color: #991b1b; }
+    .file-type-Image { background: #e0f2fe; color: #0369a1; }
+    .file-type-DOCX { background: #dbeafe; color: #1e40af; }

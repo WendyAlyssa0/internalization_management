@@ -1,0 +1,87 @@
+﻿/* Row 2 (Users / Approval Rate) + the two charts + the side column,
+   arranged to match the reference layout via named grid areas */
+.overview-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr 340px;
+    grid-template-rows:auto 1fr;
+    gap:18px;
+    grid-template-areas:
+        "users approval side"
+        "linechart donutchart side";
+    margin-bottom:22px;
+}
+.card-users{grid-area:users;}
+.card-approval{grid-area:approval;}
+.linechart-panel{grid-area:linechart; margin-bottom:0;}
+.donutchart-panel{grid-area:donutchart; margin-bottom:0;}
+.side-col{grid-area:side; display:flex; flex-direction:column; gap:18px;}
+.side-col .panel{margin-bottom:0;}
+
+.view-all-link{font-size:12.5px; font-weight:600; color:var(--blue); text-decoration:none;}
+.view-all-link:hover{text-decoration:underline;}
+
+/* Sparkline strip under each stat card's delta */
+.stat-sparkline{height:28px; margin-top:8px;}
+.stat-sparkline canvas{width:100% !important; height:28px !important;}
+.stat-delta .delta-label{font-weight:400; color:var(--text-soft);}
+.stat-delta i{font-size:11px;}
+
+/* Donut: center total overlay + right-hand legend list (uses your
+   existing .legend-dot success/warning/danger colors) */
+.donut-wrap{display:flex; align-items:center; gap:20px;}
+.donut-canvas-wrap{position:relative; flex:0 0 180px; height:180px;}
+.donut-canvas-wrap canvas{width:100% !important; height:100% !important;}
+.donut-center{position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center;}
+.donut-total{display:block; font-size:22px; font-weight:600; color:var(--ink);}
+.donut-total-label{font-size:11.5px; color:var(--text-soft);}
+.donut-legend{list-style:none; margin:0; padding:0; flex:1; display:flex; flex-direction:column; gap:14px;}
+.donut-legend li{display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text);}
+.donut-legend .legend-name{flex:1;}
+.donut-legend .legend-count{font-weight:600; color:var(--ink);}
+.donut-legend .legend-pct{color:var(--text-soft);}
+
+/* Quick actions */
+.quick-actions-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:18px;}
+.quick-action{
+    display:flex; gap:10px; align-items:flex-start; padding:12px; border-radius:var(--radius-sm);
+    border:1px solid var(--border); text-decoration:none; transition:background .15s ease, border-color .15s ease;
+}
+.quick-action:hover{background:var(--bg); border-color:var(--blue-light);}
+.qa-icon{width:34px; height:34px; font-size:14px;}
+.qa-text{display:flex; flex-direction:column; gap:2px;}
+.qa-title{font-size:13px; font-weight:600; color:var(--ink);}
+.qa-sub{font-size:11.5px; color:var(--text-soft);}
+
+/* Upcoming deadlines list */
+.deadline-list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px;}
+.deadline-list li{display:flex; justify-content:space-between; gap:10px; font-size:13px; padding:8px 0; border-bottom:1px solid var(--border);}
+.deadline-list li:last-child{border-bottom:none;}
+.deadline-name{color:var(--ink); font-weight:600;}
+.deadline-date{color:var(--text-soft); white-space:nowrap;}
+.deadlines-empty{padding:32px 12px;}
+
+/* Bottom row: recent applications table + system overview */
+.bottom-grid{display:grid; grid-template-columns:2fr 1fr; gap:18px;}
+.bottom-grid .panel{margin-bottom:0;}
+.applicant-cell{display:flex; flex-direction:column;}
+.applicant-name{font-weight:600; color:var(--ink);}
+.applicant-email{font-size:12px; color:var(--text-soft);}
+
+.system-overview-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+.so-item{display:flex; align-items:center; gap:10px;}
+.so-icon{width:36px; height:36px; font-size:14px;}
+.so-text{display:flex; flex-direction:column; gap:2px;}
+.so-label{font-size:11.5px; color:var(--text-soft);}
+.so-value{font-size:14px; font-weight:600; color:var(--ink);}
+.so-value.so-good{color:var(--success);}
+
+@media (max-width:1200px){
+    .overview-grid{grid-template-columns:1fr 1fr; grid-template-areas:"users approval" "linechart linechart" "donutchart donutchart" "side side";}
+    .bottom-grid{grid-template-columns:1fr;}
+}
+@media (max-width:640px){
+    .overview-grid{grid-template-columns:1fr; grid-template-areas:"users" "approval" "linechart" "donutchart" "side";}
+    .quick-actions-grid{grid-template-columns:1fr;}
+    .system-overview-grid{grid-template-columns:1fr;}
+    .donut-wrap{flex-direction:column;}
+}

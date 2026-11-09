@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 require_once __DIR__ . '/../config/db.php';
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -209,7 +209,6 @@ function sortHeader(string $label, string $col, string $sort, string $order): st
         <table class="table-card">
             <thead>
                 <tr>
-                    <th><?= sortHeader('ID', 'id', $sort, $order) ?></th>
                     <th><?= sortHeader('Applicant', 'applicant', $sort, $order) ?></th>
                     <th><?= sortHeader('Program', 'program', $sort, $order) ?></th>
                     <th><?= sortHeader('Department', 'department', $sort, $order) ?></th>
@@ -232,7 +231,6 @@ function sortHeader(string $label, string $col, string $sort, string $order): st
                         $statusKey = strtolower(str_replace(' ', '-', $a['status'] ?? ''));
                     ?>
                 <tr>
-                    <td>#<?= h($a['id']) ?></td>
                     <td>
                         <div class="applicant-cell">
                             <div class="applicant-avatar"><?= h($initials ?: '?') ?></div>
