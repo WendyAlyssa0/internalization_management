@@ -182,17 +182,78 @@ $stmt->execute();
 $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
-<link rel="stylesheet" href="../asset/css/program_requirements.css">
+<link rel="stylesheet" href="../asset/css/users.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
-<div class="content-card">
+<style>
+    .review-link {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 4px 10px; border-radius: 6px;
+        background: #eff6ff; color: #2563eb; font-size: 0.75rem;
+        font-weight: 600; text-decoration: none; border: 1px solid #bfdbfe;
+        white-space: nowrap;
+    }
+    .review-link:hover { background: #dbeafe; }
+
+    .file-upload-inline {
+        display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+        margin-top: 6px;
+    }
+    .file-upload-inline input[type="file"] {
+        font-size: 0.75rem; max-width: 220px;
+        border: 1px solid #e2e8f0; border-radius: 6px;
+        padding: 4px 6px; background: #fff; color: #475569;
+    }
+    .file-upload-inline input[type="file"]::file-selector-button {
+        font-size: 0.75rem; padding: 3px 8px;
+        border: none; background: #f1f5f9; color: #475569;
+        border-radius: 4px; margin-right: 6px; cursor: pointer;
+    }
+    .file-upload-inline input[type="file"]::file-selector-button:hover {
+        background: #e2e8f0;
+    }
+    .upload-hint {
+        display: block; font-size: 0.7rem; color: #94a3b8; margin-top: 4px;
+    }
+
+    .toast {
+        position: fixed; bottom: 28px; right: 28px; z-index: 2000;
+        display: flex; align-items: center; gap: 10px;
+        padding: 14px 20px; border-radius: 8px; font-size: 0.875rem;
+        font-weight: 500; color: white; box-shadow: 0 10px 15px -3px rgba(0,0,0,.1);
+        transform: translateY(12px); opacity: 0;
+        transition: opacity 0.25s ease, transform 0.25s ease; pointer-events: none;
+    }
+    .toast--show { opacity: 1; transform: translateY(0); }
+    .toast--success { background: #0f2044; }
+    .toast--error   { background: #dc2626; }
+</style>
+
+<div class="content">
+
     <div class="page-header">
         <h2>Program Requirements</h2>
         <p>Assign specific documents from your master list to individual programs.</p>
     </div>
 
     <div class="toolbar">
-        <button type="button" class="btn-primary" onclick="openAddModal()">
+        <div class="search-wrap">
+            <i class="fa fa-search"></i>
+            <input type="text" id="searchInput" placeholder="Search by program or requirement...">
+        </div>
+        <select class="filter-select" id="typeFilter">
+            <option value="">All Applicant Types</option>
+            <option value="student">Student</option>
+            <option value="faculty">Faculty</option>
+            <option value="non-teaching">Non-teaching</option>
+        </select>
+        <select class="filter-select" id="requiredFilter">
+            <option value="">All Statuses</option>
+            <option value="required">Required</option>
+            <option value="optional">Optional</option>
+        </select>
+        <button class="create-btn" id="openModalBtn" type="button">
             <i class="fa fa-plus"></i> Assign Requirement
         </button>
     </div>
@@ -205,58 +266,78 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <th>Applicant Type</th>
                     <th>Requirement</th>
                     <th>Status</th>
-                    <th>Applicant File</th>
+                    <th>Template</th>
                     <th>Created</th>
                 </tr>
             </thead>
-
-            <tbody id="requirementsBody">
+            <tbody id="tableBody">
                 <?php if (!empty($requirements)): ?>
                     <?php foreach ($requirements as $row): ?>
-                    <tr>
-                        <td style="font-weight:600;"><?= h($row['program_name']) ?></td>
-                        <td><?= h(ucwords($row['applicant_type'])) ?></td>
-                        <td>
-                            <div style="display:flex; align-items:center; gap:8px;">
-                                <i class="fa-solid fa-file-lines" style="color:#94a3b8;"></i>
-                                <?= h($row['requirement_name']) ?>
-                            </div>
-                        </td>
-                        <td>
-                            <?= $row['is_required']
-                                ? '<span class="badge-success">Required</span>'
-                                : '<span class="badge-secondary">Optional</span>' ?>
-                        </td>
-                        <td>
-                            <?php if (!empty($row['template_path'])): ?>
-                                <a class="requirement-file-link" href="../<?= h($row['template_path']) ?>" target="_blank" rel="noopener">
-                                    <i class="fa-solid fa-eye"></i> View current file
-                                </a>
-                            <?php endif; ?>
-                            <form class="requirement-file-form" enctype="multipart/form-data">
-                                <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
-                                <input type="hidden" name="action" value="upload_file">
-                                <input type="hidden" name="program_requirement_id" value="<?= (int)$row['id'] ?>">
-                                <input class="requirement-file-input" type="file" name="requirement_file" accept=".pdf,.doc,.docx" required>
-                                <button type="submit" class="btn-file-upload">
-                                    <i class="fa-solid fa-upload"></i>
-                                    <?= empty($row['template_path']) ? 'Upload template' : 'Replace template' ?>
-                                </button>
-                                <small>PDF, DOC, or DOCX (max 10 MB)</small>
-                            </form>
-                        </td>
-                        <td><?= date('M d, Y', strtotime($row['created_at'])) ?></td>
-                    </tr>
+                        <?php
+                            $typeKey     = strtolower($row['applicant_type']);
+                            $requiredKey = $row['is_required'] ? 'required' : 'optional';
+                        ?>
+                        <tr data-name="<?= h(strtolower($row['program_name'] . ' ' . $row['requirement_name'])) ?>"
+                            data-type="<?= h($typeKey) ?>"
+                            data-required="<?= h($requiredKey) ?>">
+                            <td><span style="font-weight:600; color:#0f172a;"><?= h($row['program_name']) ?></span></td>
+                            <td><span class="badge"><?= h(ucwords($row['applicant_type'])) ?></span></td>
+                            <td>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <i class="fa-solid fa-file-lines" style="color:#94a3b8;"></i>
+                                    <?= h($row['requirement_name']) ?>
+                                </div>
+                            </td>
+                            <td>
+                                <?php if ($row['is_required']): ?>
+                                    <span class="status-badge status-active">Required</span>
+                                <?php else: ?>
+                                    <span class="status-badge status-inactive">Optional</span>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <?php if (!empty($row['template_path'])): ?>
+                                    <a class="review-link" href="../<?= h($row['template_path']) ?>" target="_blank" rel="noopener" style="margin-bottom:6px;">
+                                        <i class="fa-solid fa-eye"></i> View current file
+                                    </a>
+                                <?php endif; ?>
+                                <form class="requirement-file-form" enctype="multipart/form-data">
+                                    <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
+                                    <input type="hidden" name="action" value="upload_file">
+                                    <input type="hidden" name="program_requirement_id" value="<?= (int)$row['id'] ?>">
+                                    <div class="file-upload-inline">
+                                        <input class="requirement-file-input" type="file" name="requirement_file" accept=".pdf,.doc,.docx" required>
+                                        <button type="submit" class="action-btn edit-btn" title="<?= empty($row['template_path']) ? 'Upload template' : 'Replace template' ?>">
+                                            <i class="fa-solid fa-upload"></i>
+                                        </button>
+                                    </div>
+                                    <span class="upload-hint">PDF, DOC, or DOCX (max 10 MB)</span>
+                                </form>
+                            </td>
+                            <td><?= date('M d, Y', strtotime($row['created_at'])) ?></td>
+                        </tr>
                     <?php endforeach; ?>
                 <?php else: ?>
-                    <tr class="empty-row">
-                        <td colspan="6">No requirements assigned to any program yet.</td>
+                    <tr>
+                        <td colspan="6">
+                            <div class="empty-state">
+                                <div class="empty-state-icon">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                        <path d="M14 2v6h6"/>
+                                        <path d="M9 15h6"/>
+                                        <path d="M9 11h6"/>
+                                    </svg>
+                                </div>
+                                <h3>No requirements assigned yet</h3>
+                                <p>Click "Assign Requirement" to attach documents to a program.</p>
+                            </div>
+                        </td>
                     </tr>
                 <?php endif; ?>
             </tbody>
         </table>
 
-        <!-- PAGINATION -->
         <div class="pagination">
             <span>Showing <?= count($requirements) ?> of <?= $totalCount ?> requirement<?= $totalCount === 1 ? '' : 's' ?></span>
             <div class="pages">
@@ -281,178 +362,195 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
     </div>
 </div>
 
-<!-- ===================== ADD REQUIREMENT MODAL ===================== -->
-<div id="addModal" class="modal-overlay" onclick="closeRequirementModalOutside(event,'addModal')">
+<!-- ASSIGN REQUIREMENT MODAL -->
+<div id="addModal" class="modal-backdrop" role="dialog" aria-modal="true" onclick="closeModalOutside(event)">
     <div class="modal-box">
         <div class="modal-header">
-            <div class="modal-header-left">
-                <div class="modal-icon"><i class="fa fa-file-circle-plus"></i></div>
-                <div>
-                    <h3>Assign Program Requirement</h3>
-                    <p class="modal-subtitle">Select a program and a requirement from the master list.</p>
-                </div>
+            <div>
+                <h3>Assign Program Requirement</h3>
+                <p>Select a program and a requirement from the master list.</p>
             </div>
-            <button class="modal-close" onclick="closeRequirementModal('addModal')"><i class="fa fa-times"></i></button>
+            <button class="modal-close" onclick="closeModal()" aria-label="Close"><i class="fa fa-xmark"></i></button>
         </div>
 
-        <form id="addForm">
-            <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
-            <input type="hidden" name="action" value="add">
+        <div class="modal-body">
+            <form id="addForm">
+                <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
+                <input type="hidden" name="action" value="add">
 
-            <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label"><i class="fa fa-graduation-cap"></i> Program *</label>
-                    <select name="program_id" class="form-input" required>
-                        <option value="">Select Program</option>
-                        <?php foreach ($programs as $program): ?>
-                            <option value="<?= (int)$program['id'] ?>"><?= h($program['program_name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
+                <div class="form-section-title">Assignment Details</div>
+                <div class="form-grid">
+                    <div class="form-group col-12">
+                        <label>Program <span class="required">*</span></label>
+                        <select name="program_id" required>
+                            <option value="">Select Program</option>
+                            <?php foreach ($programs as $program): ?>
+                                <option value="<?= (int)$program['id'] ?>"><?= h($program['program_name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+
+                    <div class="form-group col-12">
+                        <label>Document Requirement <span class="required">*</span></label>
+                        <select name="requirement_id" required>
+                            <option value="">Select Requirement</option>
+                            <?php foreach ($masterRequirements as $req): ?>
+                                <option value="<?= (int)$req['id'] ?>"><?= h($req['requirement_name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="form-instructions">
+                            Can't find it? <a href="?page=requirements" style="color:#2563eb;">Manage Master List</a>
+                        </p>
+                    </div>
+
+                    <div class="form-group col-6">
+                        <label>Applicant Type <span class="required">*</span></label>
+                        <select name="applicant_type" required>
+                            <option value="student">Student</option>
+                            <option value="faculty">Faculty</option>
+                            <option value="non-teaching">Non-teaching</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group col-6">
+                        <label>Mandatory?</label>
+                        <label style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;background:#fff;">
+                            <input type="checkbox" name="is_required" checked style="width:16px;height:16px;">
+                            <span style="font-size:0.875rem;color:#475569;">Yes, this requirement is mandatory</span>
+                        </label>
+                    </div>
                 </div>
 
-                <div class="form-group">
-                    <label class="form-label"><i class="fa fa-file-signature"></i> Document Requirement *</label>
-                    <select name="requirement_id" class="form-input" required>
-                        <option value="">Select Requirement</option>
-                        <?php foreach ($masterRequirements as $req): ?>
-                            <option value="<?= (int)$req['id'] ?>"><?= h($req['requirement_name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                    <small style="color:#94a3b8; font-size:11px; margin-top:4px; display:block;">
-                        Can't find it? <a href="?page=requirements" style="color:#2563eb;">Manage Master List</a>
-                    </small>
+                <div class="form-actions">
+                    <button type="button" class="btn-cancel" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn-submit">
+                        <i class="fa fa-floppy-disk"></i> Save Assignment
+                    </button>
                 </div>
-
-                <div class="form-group">
-                    <label class="form-label"><i class="fa fa-user-check"></i> Applicant Type *</label>
-                    <select name="applicant_type" class="form-input" required>
-                        <option value="student">Student</option>
-                        <option value="faculty">Faculty</option>
-                        <option value="non-teaching">Non-teaching</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label" style="flex-direction:row-reverse;justify-content:flex-end; cursor:pointer;">
-                        <input type="checkbox" name="is_required" checked style="width:16px;height:16px; margin-left:8px;">
-                        Is this requirement mandatory?
-                    </label>
-                </div>
-            </div>
-
-            <div class="modal-footer">
-                <button type="button" class="btn-secondary" onclick="closeRequirementModal('addModal')">Cancel</button>
-                <button type="submit" class="btn-confirm"><i class="fa fa-floppy-disk"></i> Save Assignment</button>
-            </div>
-        </form>
+            </form>
+        </div>
     </div>
 </div>
 
 <script>
-window.PROGRAM_REQUIREMENTS_CSRF = <?= json_encode($csrfToken) ?>;
+(function () {
+    /* ---------- Filters ---------- */
+    var searchInput    = document.getElementById('searchInput');
+    var typeFilter     = document.getElementById('typeFilter');
+    var requiredFilter = document.getElementById('requiredFilter');
 
-/* Modal Helpers */
-function openRequirementModal(id) {
-    document.getElementById(id).classList.add('open');
-    document.body.style.overflow = 'hidden';
-}
-function closeRequirementModal(id) {
-    document.getElementById(id).classList.remove('open');
-    document.body.style.overflow = '';
-}
-function closeRequirementModalOutside(e, id) {
-    if (e.target.id === id) closeRequirementModal(id);
-}
-document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeRequirementModal('addModal');
-});
-
-function openAddModal() {
-    document.getElementById('addForm').reset();
-    openRequirementModal('addModal');
-}
-
-/* 1. Handle Add Requirement Form Submit */
-document.getElementById('addForm').addEventListener('submit', function (e) {
-    e.preventDefault();
-    const form = this;
-    const btn  = form.querySelector('[type="submit"]');
-    const original = btn.innerHTML;
-    btn.disabled  = true;
-    btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Saving...';
-
-    fetch('', { method: 'POST', body: new FormData(form) })
-        .then(async res => {
-            const text = await res.text();
-            try { return JSON.parse(text); } 
-            catch { throw new Error("Invalid server response"); }
-        })
-        .then(data => {
-            showToast(data.ok ? 'success' : 'error', data.message);
-            if (data.ok) {
-                closeRequirementModal('addModal');
-                setTimeout(() => location.reload(), 1200);
-            }
-        })
-        .catch((err) => {
-            console.error(err);
-            showToast('error', 'Server error. Please try again.')
-        })
-        .finally(() => {
-            btn.disabled  = false;
-            btn.innerHTML = original;
+    function filterTable() {
+        var search   = searchInput.value.toLowerCase();
+        var type     = typeFilter.value.toLowerCase();
+        var required = requiredFilter.value.toLowerCase();
+        document.querySelectorAll('#tableBody tr[data-name]').forEach(function (row) {
+            var name    = row.dataset.name     || '';
+            var rowType = row.dataset.type     || '';
+            var rowReq  = row.dataset.required || '';
+            row.style.display =
+                (!search   || name.includes(search)) &&
+                (!type     || rowType === type) &&
+                (!required || rowReq === required)
+                ? '' : 'none';
         });
-});
+    }
+    if (searchInput)    searchInput.addEventListener('input',  filterTable);
+    if (typeFilter)     typeFilter.addEventListener('change', filterTable);
+    if (requiredFilter) requiredFilter.addEventListener('change', filterTable);
 
-/* 2. Handle File Uploads (Moved OUTSIDE the addForm listener) */
-document.querySelectorAll('.requirement-file-form').forEach(form => {
+    /* ---------- Modal ---------- */
+    var modal     = document.getElementById('addModal');
+    var openBtn   = document.getElementById('openModalBtn');
+    var form      = document.getElementById('addForm');
+
+    function openModal()  { modal.classList.add('open');    document.body.style.overflow = 'hidden'; }
+    function closeModal() { modal.classList.remove('open'); document.body.style.overflow = ''; }
+
+    window.closeModal = closeModal;
+    window.closeModalOutside = function (e) { if (e.target === modal) closeModal(); };
+
+    if (openBtn) openBtn.addEventListener('click', function () { form.reset(); openModal(); });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && modal.classList.contains('open')) closeModal();
+    });
+
+    /* ---------- Add Requirement (unchanged backend) ---------- */
     form.addEventListener('submit', function (e) {
         e.preventDefault();
-        const button = this.querySelector('[type="submit"]');
-        const original = button.innerHTML;
-        button.disabled = true;
-        button.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Uploading...';
+        var btn = form.querySelector('[type="submit"]');
+        var original = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Saving...';
 
-        fetch('', { method: 'POST', body: new FormData(this) })
-            .then(async response => {
-                const text = await response.text();
+        fetch('', { method: 'POST', body: new FormData(form) })
+            .then(async function (res) {
+                var text = await res.text();
                 try { return JSON.parse(text); }
-                catch { throw new Error('Invalid server response'); }
+                catch (e) { throw new Error('Invalid server response'); }
             })
-            .then(data => {
+            .then(function (data) {
                 showToast(data.ok ? 'success' : 'error', data.message);
-                if (data.ok) setTimeout(() => location.reload(), 900);
+                if (data.ok) {
+                    closeModal();
+                    setTimeout(function () { location.reload(); }, 1200);
+                }
             })
-            .catch(error => {
-                console.error(error);
-                showToast('error', 'The file could not be uploaded. Please try again.');
+            .catch(function (err) {
+                console.error(err);
+                showToast('error', 'Server error. Please try again.');
             })
-            .finally(() => {
-                button.disabled = false;
-                button.innerHTML = original;
+            .finally(function () {
+                btn.disabled = false;
+                btn.innerHTML = original;
             });
     });
-});
 
-/* Toast Helper */
-function showToast(type, message) {
-    const existing = document.querySelector('.toast');
-    if (existing) existing.remove();
+    /* ---------- Template Upload (unchanged backend) ---------- */
+    document.querySelectorAll('.requirement-file-form').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var button = this.querySelector('[type="submit"]');
+            var original = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<i class="fa fa-spinner fa-spin"></i>';
 
-    const toast = document.createElement('div');
-    toast.className = `toast toast--${type}`;
-    toast.innerHTML = `
-        <i class="fa fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
-        <span></span>
-    `;
-    toast.querySelector('span').textContent = message;
+            fetch('', { method: 'POST', body: new FormData(this) })
+                .then(async function (response) {
+                    var text = await response.text();
+                    try { return JSON.parse(text); }
+                    catch (e) { throw new Error('Invalid server response'); }
+                })
+                .then(function (data) {
+                    showToast(data.ok ? 'success' : 'error', data.message);
+                    if (data.ok) setTimeout(function () { location.reload(); }, 900);
+                })
+                .catch(function (error) {
+                    console.error(error);
+                    showToast('error', 'The file could not be uploaded. Please try again.');
+                })
+                .finally(function () {
+                    button.disabled = false;
+                    button.innerHTML = original;
+                });
+        });
+    });
 
-    document.body.appendChild(toast);
-    requestAnimationFrame(() => toast.classList.add('toast--show'));
+    /* ---------- Toast ---------- */
+    window.showToast = function (type, message) {
+        var existing = document.querySelector('.toast');
+        if (existing) existing.remove();
 
-    setTimeout(() => {
-        toast.classList.remove('toast--show');
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
-}
+        var toast = document.createElement('div');
+        toast.className = 'toast toast--' + type;
+        toast.innerHTML = '<i class="fa fa-' + (type === 'success' ? 'check-circle' : 'exclamation-circle') + '"></i><span></span>';
+        toast.querySelector('span').textContent = message;
+        document.body.appendChild(toast);
+
+        requestAnimationFrame(function () { toast.classList.add('toast--show'); });
+        setTimeout(function () {
+            toast.classList.remove('toast--show');
+            setTimeout(function () { toast.remove(); }, 300);
+        }, 3000);
+    };
+})();
 </script>

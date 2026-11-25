@@ -196,100 +196,316 @@ $countries = $pdo->query("
 ")->fetchAll(PDO::FETCH_COLUMN);
 ?>
 
-<section class="content">
+<link rel="stylesheet" href="../asset/css/users.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+<div class="content">
+
+    <?php if ($error !== ''): ?>
+        <div class="error-box" style="margin-bottom:20px;">
+            <i class="fa-solid fa-circle-exclamation"></i> <?= inboundEscape($error) ?>
+        </div>
+    <?php endif; ?>
+
     <div class="page-header">
         <h2>Inbound Participants</h2>
         <p>Record visiting students, faculty, and non-teaching staff. These records do not create user accounts.</p>
     </div>
-    <?php if ($error !== ''): ?>
-        <p role="alert" style="padding:12px;background:#fee2e2;color:#991b1b;border-radius:8px;"><?= inboundEscape($error) ?></p>
-    <?php endif; ?>
-    <form method="post" action="inbound_students.php" enctype="multipart/form-data" id="inboundParticipantForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;padding:20px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:20px;">
-        <input type="hidden" name="csrf_token" value="<?= inboundEscape($csrf) ?>">
-        <input type="hidden" name="action" value="save">
-        <input type="hidden" name="id" value="">
-        <label>First name <input name="first_name" required maxlength="120"></label>
-        <label>Last name <input name="last_name" required maxlength="120"></label>
-        <label>Participant type
-            <select name="participant_type" required>
-                <option value="student">Student</option>
-                <option value="faculty">Faculty</option>
-                <option value="non-teaching">Non-teaching</option>
-            </select>
-        </label>
-        <label>Home institution <input name="home_institution" required maxlength="255"></label>
-        <label>Country
-            <select name="country_name" required>
-                <option value="">Select country</option>
-                <?php foreach ($countries as $country): ?><option><?= inboundEscape($country) ?></option><?php endforeach; ?>
-            </select>
-        </label>
-        <label>Inbound program
-            <select name="program_id">
-                <option value="">Not assigned</option>
-                <?php foreach ($programs as $program): ?><option value="<?= (int)$program['id'] ?>"><?= inboundEscape($program['program_name']) ?></option><?php endforeach; ?>
-            </select>
-        </label>
-        <label>Arrival date <input type="date" name="arrival_date"></label>
-        <label>Departure date <input type="date" name="departure_date"></label>
-        <label>Narrative report <input type="file" name="narrative_report" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"></label>
-        <label>Evaluation <input type="file" name="evaluation" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"></label>
-        <label style="grid-column:1/-1;">Notes <textarea name="notes" rows="2"></textarea></label>
-        <div style="grid-column:1/-1;display:flex;gap:8px;">
-            <button type="submit" id="inboundSubmitButton">Save participant</button>
-            <button type="button" id="inboundCancelEdit" hidden onclick="resetInboundForm()">Cancel edit</button>
-        </div>
-    </form>
 
-    <div class="table-card" style="overflow-x:auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;">
-        <table style="width:100%;border-collapse:collapse;">
-            <thead><tr><th>Name</th><th>Type</th><th>Institution</th><th>Country</th><th>Program</th><th>Dates</th><th>Reports</th><th>Actions</th></tr></thead>
-            <tbody>
-            <?php foreach ($participants as $participant): ?>
+    <div class="toolbar">
+        <div class="search-wrap">
+            <i class="fa fa-search"></i>
+            <input type="text" id="searchInput" placeholder="Search participants...">
+        </div>
+        <select class="filter-select" id="typeFilter">
+            <option value="">All Types</option>
+            <option value="student">Student</option>
+            <option value="faculty">Faculty</option>
+            <option value="non-teaching">Non-teaching</option>
+        </select>
+        <select class="filter-select" id="programFilter">
+            <option value="">All Programs</option>
+            <?php foreach ($programs as $program): ?>
+                <option value="<?= inboundEscape(strtolower($program['program_name'])) ?>"><?= inboundEscape($program['program_name']) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <button class="create-btn" id="openModalBtn" type="button">
+            <i class="fa fa-plus"></i> Add Participant
+        </button>
+    </div>
+
+    <div class="table-card">
+        <table>
+            <thead>
                 <tr>
-                    <td><?= inboundEscape($participant['first_name'] . ' ' . $participant['last_name']) ?></td>
-                    <td><?= inboundEscape(ucwords($participant['participant_type'])) ?></td>
-                    <td><?= inboundEscape($participant['home_institution']) ?></td>
-                    <td><?= inboundEscape($participant['country_name']) ?></td>
-                    <td><?= inboundEscape($participant['program_name'] ?? '—') ?></td>
-                    <td><?= inboundEscape($participant['arrival_date'] ?? '—') ?> – <?= inboundEscape($participant['departure_date'] ?? '—') ?></td>
-                    <td>
-                        <?php foreach (['Narrative report' => $participant['narrative_report_path'], 'Evaluation' => $participant['evaluation_path']] as $label => $path): ?>
-                            <?php if ($path): ?><a href="../<?= inboundEscape($path) ?>" target="_blank" rel="noopener"><?= inboundEscape($label) ?></a><br><?php endif; ?>
-                        <?php endforeach; ?>
-                        <?php if (!$participant['narrative_report_path'] && !$participant['evaluation_path']): ?>None uploaded<?php endif; ?>
-                    </td>
-                    <td>
-                        <button type="button" onclick='editInboundParticipant(<?= json_encode($participant, JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP) ?>)'>Edit</button>
-                        <form method="post" action="inbound_students.php" onsubmit="return confirm('Remove this inbound participant record?')">
-                            <input type="hidden" name="csrf_token" value="<?= inboundEscape($csrf) ?>">
-                            <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="id" value="<?= (int)$participant['id'] ?>">
-                            <button type="submit">Remove</button>
-                        </form>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Institution</th>
+                    <th>Country</th>
+                    <th>Program</th>
+                    <th>Dates</th>
+                    <th>Reports</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+            <?php if (!empty($participants)): ?>
+                <?php foreach ($participants as $participant): ?>
+                    <?php
+                        $fullname = trim($participant['first_name'] . ' ' . $participant['last_name']);
+                        $ptype    = strtolower($participant['participant_type']);
+                        $progName = $participant['program_name'] ?? '';
+                    ?>
+                    <tr data-name="<?= inboundEscape(strtolower($fullname)) ?>"
+                        data-type="<?= inboundEscape($ptype) ?>"
+                        data-program="<?= inboundEscape(strtolower($progName)) ?>">
+                        <td>
+                            <div class="user-name-cell">
+                                <div class="user-avatar">
+                                    <?= inboundEscape(strtoupper(substr($participant['first_name'], 0, 1) . substr($participant['last_name'], 0, 1))) ?>
+                                </div>
+                                <span style="font-weight:600; color:#0f172a;"><?= inboundEscape($fullname) ?></span>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="badge"><?= inboundEscape(ucwords($participant['participant_type'])) ?></span>
+                        </td>
+                        <td><?= inboundEscape($participant['home_institution']) ?></td>
+                        <td><?= inboundEscape($participant['country_name']) ?></td>
+                        <td><?= inboundEscape($progName ?: '—') ?></td>
+                        <td>
+                            <?= inboundEscape($participant['arrival_date'] ?? '—') ?>
+                            &nbsp;–&nbsp;
+                            <?= inboundEscape($participant['departure_date'] ?? '—') ?>
+                        </td>
+                        <td>
+                            <?php if ($participant['narrative_report_path'] || $participant['evaluation_path']): ?>
+                                <?php if ($participant['narrative_report_path']): ?>
+                                    <a href="../<?= inboundEscape($participant['narrative_report_path']) ?>" target="_blank" rel="noopener" class="badge" style="text-decoration:none;">
+                                        <i class="fa-regular fa-file-lines"></i> Narrative
+                                    </a>
+                                <?php endif; ?>
+                                <?php if ($participant['evaluation_path']): ?>
+                                    <a href="../<?= inboundEscape($participant['evaluation_path']) ?>" target="_blank" rel="noopener" class="badge" style="text-decoration:none;">
+                                        <i class="fa-regular fa-clipboard"></i> Evaluation
+                                    </a>
+                                <?php endif; ?>
+                            <?php else: ?>
+                                <span style="color:#94a3b8;">None uploaded</span>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <div class="actions">
+                                <button type="button"
+                                        class="action-btn edit-btn"
+                                        title="Edit participant"
+                                        onclick='editInboundParticipant(<?= json_encode($participant, JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP) ?>)'>
+                                    <i class="fa fa-pen"></i>
+                                </button>
+                                <form method="post" action="inbound_students.php" style="display:inline;"
+                                      onsubmit="return confirm('Remove this inbound participant record?')">
+                                    <input type="hidden" name="csrf_token" value="<?= inboundEscape($csrf) ?>">
+                                    <input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="id" value="<?= (int)$participant['id'] ?>">
+                                    <button type="submit" class="action-btn delete-btn" title="Remove participant">
+                                        <i class="fa fa-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <tr>
+                    <td colspan="8">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                                    <circle cx="9" cy="7" r="4"/>
+                                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                                </svg>
+                            </div>
+                            <h3>No inbound participants yet</h3>
+                            <p>Click "Add Participant" to record the first visiting participant.</p>
+                        </div>
                     </td>
                 </tr>
-            <?php endforeach; ?>
-            <?php if (!$participants): ?><tr><td colspan="8">No inbound participants recorded yet.</td></tr><?php endif; ?>
+            <?php endif; ?>
             </tbody>
         </table>
     </div>
-</section>
+</div>
+
+<!-- ADD / EDIT PARTICIPANT MODAL -->
+<div id="participantModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="participantModalTitle">
+    <div class="modal-box">
+        <div class="modal-header">
+            <div>
+                <h3 id="participantModalTitle">Add Inbound Participant</h3>
+                <p>Inbound is a standalone record — no user account is created for the participant.</p>
+            </div>
+            <button class="modal-close" id="closeModalBtn" type="button" aria-label="Close modal">
+                <i class="fa fa-xmark"></i>
+            </button>
+        </div>
+
+        <div class="modal-body">
+            <form method="post" action="inbound_students.php" enctype="multipart/form-data" id="inboundParticipantForm">
+                <input type="hidden" name="csrf_token" value="<?= inboundEscape($csrf) ?>">
+                <input type="hidden" name="action" value="save">
+                <input type="hidden" name="id" value="">
+
+                <div class="form-section-title">Participant Details</div>
+                <div class="form-grid">
+                    <div class="form-group col-6">
+                        <label>First Name <span class="required">*</span></label>
+                        <input name="first_name" required maxlength="120">
+                    </div>
+                    <div class="form-group col-6">
+                        <label>Last Name <span class="required">*</span></label>
+                        <input name="last_name" required maxlength="120">
+                    </div>
+                    <div class="form-group col-4">
+                        <label>Participant Type <span class="required">*</span></label>
+                        <select name="participant_type" required>
+                            <option value="student">Student</option>
+                            <option value="faculty">Faculty</option>
+                            <option value="non-teaching">Non-teaching</option>
+                        </select>
+                    </div>
+                    <div class="form-group col-4">
+                        <label>Home Institution <span class="required">*</span></label>
+                        <input name="home_institution" required maxlength="255">
+                    </div>
+                    <div class="form-group col-4">
+                        <label>Country <span class="required">*</span></label>
+                        <select name="country_name" required>
+                            <option value="">Select country</option>
+                            <?php foreach ($countries as $country): ?>
+                                <option><?= inboundEscape($country) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-section-title">Program &amp; Schedule</div>
+                <div class="form-grid">
+                    <div class="form-group col-4">
+                        <label>Inbound Program</label>
+                        <select name="program_id">
+                            <option value="">Not assigned</option>
+                            <?php foreach ($programs as $program): ?>
+                                <option value="<?= (int)$program['id'] ?>"><?= inboundEscape($program['program_name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="form-instructions">Only active inbound programs are listed.</p>
+                    </div>
+                    <div class="form-group col-4">
+                        <label>Arrival Date</label>
+                        <input type="date" name="arrival_date">
+                    </div>
+                    <div class="form-group col-4">
+                        <label>Departure Date</label>
+                        <input type="date" name="departure_date">
+                    </div>
+                </div>
+
+                <div class="form-section-title">Reports</div>
+                <div class="form-grid">
+                    <div class="form-group col-6">
+                        <label>Narrative Report</label>
+                        <input type="file" name="narrative_report" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png">
+                        <p class="form-instructions">PDF, DOC, DOCX, JPG, or PNG. Max 10 MB. Leave blank to keep existing.</p>
+                    </div>
+                    <div class="form-group col-6">
+                        <label>Evaluation</label>
+                        <input type="file" name="evaluation" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png">
+                        <p class="form-instructions">PDF, DOC, DOCX, JPG, or PNG. Max 10 MB. Leave blank to keep existing.</p>
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-group col-12">
+                        <label>Notes</label>
+                        <textarea name="notes" rows="3" placeholder="Optional notes about this participant"></textarea>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn-cancel" id="cancelModalBtn">Cancel</button>
+                    <button type="submit" class="btn-submit" id="inboundSubmitButton">
+                        <i class="fa-solid fa-user-plus"></i> Save Participant
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script>
-const inboundForm = document.getElementById('inboundParticipantForm');
-function resetInboundForm() {
-    inboundForm.reset();
-    inboundForm.elements.id.value = '';
-    document.getElementById('inboundSubmitButton').textContent = 'Save participant';
-    document.getElementById('inboundCancelEdit').hidden = true;
-}
-function editInboundParticipant(participant) {
-    Object.keys(participant).forEach(key => {
-        if (inboundForm.elements[key]) inboundForm.elements[key].value = participant[key] ?? '';
+(function () {
+    var searchInput   = document.getElementById('searchInput');
+    var typeFilter    = document.getElementById('typeFilter');
+    var programFilter = document.getElementById('programFilter');
+
+    function filterTable() {
+        var search  = searchInput.value.toLowerCase();
+        var type    = typeFilter.value.toLowerCase();
+        var program = programFilter.value.toLowerCase();
+        document.querySelectorAll('#tableBody tr[data-name]').forEach(function (row) {
+            var name    = row.dataset.name    || '';
+            var rowType = row.dataset.type    || '';
+            var rowProg = row.dataset.program || '';
+            row.style.display =
+                (!search  || name.includes(search)) &&
+                (!type    || rowType === type) &&
+                (!program || rowProg === program)
+                ? '' : 'none';
+        });
+    }
+
+    if (searchInput)   searchInput.addEventListener('input',  filterTable);
+    if (typeFilter)    typeFilter.addEventListener('change',  filterTable);
+    if (programFilter) programFilter.addEventListener('change', filterTable);
+
+    var modal         = document.getElementById('participantModal');
+    var openBtn       = document.getElementById('openModalBtn');
+    var closeBtn      = document.getElementById('closeModalBtn');
+    var cancelBtn     = document.getElementById('cancelModalBtn');
+    var form          = document.getElementById('inboundParticipantForm');
+    var submitBtn     = document.getElementById('inboundSubmitButton');
+    var modalTitle    = document.getElementById('participantModalTitle');
+
+    function openModal()  { modal.classList.add('open');    document.body.style.overflow = 'hidden'; }
+    function closeModal() { modal.classList.remove('open'); document.body.style.overflow = ''; }
+
+    function resetForm() {
+        form.reset();
+        form.elements.id.value = '';
+        submitBtn.innerHTML = '<i class="fa-solid fa-user-plus"></i> Save Participant';
+        modalTitle.textContent = 'Add Inbound Participant';
+    }
+
+    if (openBtn)   openBtn.addEventListener('click', function () { resetForm(); openModal(); });
+    if (closeBtn)  closeBtn.addEventListener('click', closeModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && modal.classList.contains('open')) closeModal();
     });
-    inboundForm.elements.action.value = 'save';
-    document.getElementById('inboundSubmitButton').textContent = 'Update participant';
-    document.getElementById('inboundCancelEdit').hidden = false;
-    inboundForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
+
+    window.editInboundParticipant = function (participant) {
+        resetForm();
+        Object.keys(participant).forEach(function (key) {
+            if (form.elements[key]) form.elements[key].value = participant[key] ?? '';
+        });
+        form.elements.id.value = participant.id;
+        submitBtn.innerHTML = '<i class="fa-solid fa-user-check"></i> Update Participant';
+        modalTitle.textContent = 'Edit Inbound Participant';
+        openModal();
+    };
+})();
 </script>
