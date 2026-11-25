@@ -1,5 +1,8 @@
 <?php
+declare(strict_types=1);
+
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/roles.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -10,24 +13,36 @@ if (!isset($_SESSION['user_id'])) {
     exit();
 }
 
+/* CSRF TOKEN */
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrfToken = $_SESSION['csrf_token'];
+
 $pdo = db();
 
-$limit  = 10;
-$page   = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
-$offset = ($page - 1) * $limit;
+/* =========================
+   USER CONTEXT
+========================= */
+$user_id = (int)$_SESSION['user_id'];
+$role    = strtolower(trim((string)($_SESSION['user_role'] ?? '')));
+$role    = str_replace('_', ' ', $role);
 
-$user_id = $_SESSION['user_id'];
-$role = strtolower($_SESSION['user_role'] ?? '');
-function h($value): string {
-    return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+/* =========================
+   HELPERS
+========================= */
+if (!function_exists('h')) {
+    function h($value): string {
+        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+    }
 }
 
 /* =========================
    FILTERS
 ========================= */
-$search = trim($_GET['search'] ?? '');
-$type   = trim($_GET['type'] ?? '');
-$view   = $_GET['view'] ?? 'all';
+$search = trim((string)($_GET['search'] ?? ''));
+$type   = trim((string)($_GET['type'] ?? ''));
+$view   = (string)($_GET['view'] ?? 'all');
 
 /* =========================
    PAGINATION
@@ -36,59 +51,42 @@ $limit  = 10;
 $page   = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
 $offset = ($page - 1) * $limit;
 
-/* =========================
-   WHERE BUILDER
-========================= */
-$where = "WHERE 1=1";
-$params = [];
+/* ROLE ACCESS: non-admins only see their own uploads */
+$isAdminRole = in_array($role, ['admin', 'super admin', 'ad', 'sa'], true);
+$like = "%$search%";
 
-/* ROLE ACCESS */
-if (!in_array($role, ['admin', 'super admin'], true)) {
-    $where .= " AND d.user_id = :user_id";
-    $params[':user_id'] = $user_id;
+/* =========================================================
+   SOURCE A: documents table (general uploaded documents)
+========================================================= */
+$whereA  = "WHERE 1=1";
+$paramsA = [];
+
+if (!$isAdminRole) {
+    $whereA .= " AND d.user_id = :user_id";
+    $paramsA[':user_id'] = $user_id;
 }
-
-/* SEARCH */
 if ($search !== '') {
-    $where .= " AND (
-        d.id LIKE ? OR
-        d.title LIKE ? OR
-        d.file_type LIKE ? OR
-        COALESCE(CONCAT(u.first_name,' ',u.last_name), '') LIKE ?
+    $whereA .= " AND (
+        d.id LIKE :s1 OR
+        d.title LIKE :s2 OR
+        d.file_type LIKE :s3 OR
+        COALESCE(CONCAT(u.first_name,' ',u.last_name), '') LIKE :s4
     )";
-    $like = "%$search%";
-    array_push($params, $like, $like, $like, $like);
+    $paramsA[':s1'] = $like;
+    $paramsA[':s2'] = $like;
+    $paramsA[':s3'] = $like;
+    $paramsA[':s4'] = $like;
 }
-
-/* TYPE FILTER */
 if ($type !== '') {
-    $where .= " AND LOWER(d.file_type) = LOWER(:type)";
-    $params[':type'] = $type;
+    $whereA .= " AND LOWER(d.file_type) = LOWER(:type)";
+    $paramsA[':type'] = $type;
 }
-
-/* VIEW FILTER */
 if ($view === 'new') {
-    $where .= " AND LOWER(d.status) = 'pending'";
+    $whereA .= " AND LOWER(d.status) = 'pending'";
 }
 
-/* =========================
-   COUNT QUERY
-========================= */
-$countSql = "
-    SELECT COUNT(*)
-    FROM documents d
-    LEFT JOIN users u ON d.user_id = u.id
-    $where
-";
-
-$countStmt = $pdo->prepare($countSql);
-$countStmt->execute($params);
-$totalDocs = (int)$countStmt->fetchColumn();
-
-/* =========================
-   DATA QUERY
-========================= */
-$sql = "
+$docsFromDocuments = [];
+$stmtA = $pdo->prepare("
     SELECT
         d.id,
         d.title,
@@ -99,21 +97,98 @@ $sql = "
         COALESCE(CONCAT(u.first_name,' ',u.last_name), 'Unknown') AS uploader
     FROM documents d
     LEFT JOIN users u ON d.user_id = u.id
-    $where
+    $whereA
     ORDER BY d.created_at DESC
-    LIMIT :limit OFFSET :offset
-";
-
-$stmt = $pdo->prepare($sql);
-foreach ($params as $key => $value) {
-    $stmt->bindValue($key, $value);
+    LIMIT 2000
+");
+$stmtA->execute($paramsA);
+foreach ($stmtA->fetchAll(PDO::FETCH_ASSOC) as $row) {
+    $row['source'] = 'document';
+    $docsFromDocuments[] = $row;
 }
-$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-$stmt->execute();
 
-$documents  = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$totalPages = max(1, ceil($totalDocs / $limit));
+/* =========================================================
+   SOURCE B: user_documents table (applicant requirement uploads)
+   These have no review status, so they are shown in the "all" view only.
+========================================================= */
+$docsFromApplicants = [];
+
+if ($view !== 'new') {
+    $extExpr = "LOWER(SUBSTRING_INDEX(ud.file_path, '.', -1))";
+    $whereB  = "WHERE 1=1";
+    $paramsB = [];
+
+    if (!$isAdminRole) {
+        $whereB .= " AND ud.user_id = :user_id";
+        $paramsB[':user_id'] = $user_id;
+    }
+    if ($search !== '') {
+        $whereB .= " AND (
+            ud.id LIKE :s1 OR
+            r.requirement_name LIKE :s2 OR
+            COALESCE(p.program_name, '') LIKE :s3 OR
+            COALESCE(CONCAT(u.first_name,' ',u.last_name), '') LIKE :s4
+        )";
+        $paramsB[':s1'] = $like;
+        $paramsB[':s2'] = $like;
+        $paramsB[':s3'] = $like;
+        $paramsB[':s4'] = $like;
+    }
+    if ($type !== '') {
+        if (strtolower($type) === 'image') {
+            $whereB .= " AND $extExpr IN ('jpg','jpeg','png')";
+        } else {
+            $whereB .= " AND $extExpr = LOWER(:type)";
+            $paramsB[':type'] = $type;
+        }
+    }
+
+    try {
+        $stmtB = $pdo->prepare("
+            SELECT
+                ud.id,
+                CONCAT_WS(' - ', r.requirement_name, p.program_name) AS title,
+                $extExpr AS file_type,
+                ud.file_path,
+                'uploaded' AS status,
+                ud.uploaded_at AS created_at,
+                COALESCE(CONCAT(u.first_name,' ',u.last_name), 'Unknown') AS uploader
+            FROM user_documents ud
+            INNER JOIN program_requirements pr ON pr.id = ud.requirement_id
+            INNER JOIN requirements r          ON r.id  = pr.requirement_id
+            LEFT JOIN programs p               ON p.id  = pr.program_id
+            LEFT JOIN users u                  ON u.id  = ud.user_id
+            $whereB
+            ORDER BY ud.uploaded_at DESC
+            LIMIT 2000
+        ");
+        $stmtB->execute($paramsB);
+        foreach ($stmtB->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row['source'] = 'applicant';
+            $docsFromApplicants[] = $row;
+        }
+    } catch (PDOException $e) {
+        error_log('documents page: applicant uploads query failed: ' . $e->getMessage());
+    }
+}
+
+/* =========================
+   MERGE + SORT + PAGINATE
+========================= */
+$allDocs = array_merge($docsFromDocuments, $docsFromApplicants);
+usort($allDocs, static function (array $a, array $b): int {
+    return strtotime((string)$b['created_at']) <=> strtotime((string)$a['created_at']);
+});
+
+$totalDocs  = count($allDocs);
+$totalPages = max(1, (int)ceil($totalDocs / $limit));
+$documents  = array_slice($allDocs, $offset, $limit);
+
+/* =========================
+   PERMISSION FLAGS FOR UI
+========================= */
+$canReview = isApprover() || isAdmin() || isSuperAdmin();
+$canDelete = canManageSystem() || isAdmin() || isSuperAdmin();
 ?>
 
 <link rel="stylesheet" href="../asset/css/applications.css">
@@ -121,7 +196,7 @@ $totalPages = max(1, ceil($totalDocs / $limit));
 
 <div class="page-header">
     <h2>Document Management</h2>
-    <p>Handles all uploaded documents.</p>
+    <p>Handles all uploaded documents, including applicant requirement uploads.</p>
 </div>
 
 <!-- SEARCH -->
@@ -138,9 +213,9 @@ $totalPages = max(1, ceil($totalDocs / $limit));
 
     <select name="type">
         <option value="">All Types</option>
-        <option value="pdf">PDF</option>
-        <option value="docx">DOCX</option>
-        <option value="image">Image</option>
+        <option value="pdf"   <?= $type === 'pdf'   ? 'selected' : '' ?>>PDF</option>
+        <option value="docx"  <?= $type === 'docx'  ? 'selected' : '' ?>>DOCX</option>
+        <option value="image" <?= $type === 'image' ? 'selected' : '' ?>>Image</option>
     </select>
 
     <button type="submit">Filter</button>
@@ -163,88 +238,106 @@ $totalPages = max(1, ceil($totalDocs / $limit));
 <tbody>
 <?php if (!empty($documents)): ?>
     <?php foreach ($documents as $d): ?>
+        <?php
+            $isApplicantUpload = ($d['source'] === 'applicant');
+            $statusKey = strtolower((string)$d['status']);
+            $safePath  = (string)$d['file_path'];
+            // Guard: only allow safe relative paths
+            $linkable = (bool)preg_match('#^[A-Za-z0-9_./-]+$#', $safePath);
+            // Applicant uploads are stored relative to the project root; this page lives in /admin
+            $href = $isApplicantUpload ? '../' . ltrim($safePath, '/') : $safePath;
+        ?>
 <tr>
     <td><?= h($d['uploader']) ?></td>
-    <td><?= h($d['title']) ?></td>
+    <td>
+        <?= h($d['title']) ?>
+        <?php if ($isApplicantUpload): ?>
+            <br><small style="color:#64748b;">Applicant requirement</small>
+        <?php endif; ?>
+    </td>
     <td><?= h($d['file_type']) ?></td>
 
     <td>
-<span class="status-badge status-<?= strtolower($d['status']) ?>">
-                <?= ucfirst($d['status']) ?>
+        <span class="status-badge status-<?= h($statusKey) ?>">
+            <?= h(ucfirst($statusKey)) ?>
         </span>
     </td>
 
-    <td><?= date('M d, Y', strtotime($d['created_at'])) ?></td>
+    <td><?= h(date('M d, Y', strtotime((string)$d['created_at']))) ?></td>
 
     <td class="action-btns">
 
-        <a href="<?= h($d['file_path']) ?>" target="_blank" class="btn-view">
-            <i class="fa fa-eye"></i>
-        </a>
+        <?php if ($linkable): ?>
+            <a href="<?= h($href) ?>" target="_blank" rel="noopener" class="btn-view">
+                <i class="fa fa-eye"></i>
+            </a>
+        <?php endif; ?>
 
-        <button class="btn-approve" onclick="confirmAction('approve', <?= (int)$d['id'] ?>)">
-            <i class="fa fa-check"></i>
-        </button>
+        <?php if (!$isApplicantUpload): ?>
+            <?php if ($canReview): ?>
+                <button class="btn-approve" onclick="confirmAction('approve', <?= (int)$d['id'] ?>)">
+                    <i class="fa fa-check"></i>
+                </button>
 
-        <button class="btn-reject" onclick="confirmAction('reject', <?= (int)$d['id'] ?>)">
-            <i class="fa fa-close"></i>
-        </button>
+                <button class="btn-reject" onclick="confirmAction('reject', <?= (int)$d['id'] ?>)">
+                    <i class="fa fa-close"></i>
+                </button>
+            <?php endif; ?>
 
-        <button class="btn-delete" onclick="confirmAction('delete', <?= (int)$d['id'] ?>)">
-            <i class="fa fa-trash"></i>
-        </button>
+            <?php if ($canDelete): ?>
+                <button class="btn-delete" onclick="confirmAction('delete', <?= (int)$d['id'] ?>)">
+                    <i class="fa fa-trash"></i>
+                </button>
+            <?php endif; ?>
+        <?php endif; ?>
 
     </td>
 </tr>
-<?php endforeach; ?>
+    <?php endforeach; ?>
 <?php else: ?>
 <tr>
-    <td colspan="7" class="empty-row">No documents found</td>
+    <td colspan="6" class="empty-row">No documents found</td>
 </tr>
 <?php endif; ?>
 </tbody>
 </table>
 
 <!-- PAGINATION -->
-        <div class="pagination">
-            <span>
-                Showing <?= count($documents) ?> of <?= $totalDocs ?> documents
-            </span>
-            <div class="pages">
-                <?php
-                    $baseQ = array_merge($_GET, []);
-                    unset($baseQ['p']);
-                ?>
-                <?php if ($page > 1): ?>
-                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>">
-                        <i class="fa fa-angle-left"></i>
-                    </a>
-                <?php else: ?>
-                    <button class="page-arrow" disabled><i class="fa fa-angle-left"></i></button>
-                <?php endif; ?>
+<div class="pagination">
+    <span>Showing <?= count($documents) ?> of <?= $totalDocs ?> documents</span>
+    <div class="pages">
+        <?php
+            $baseQ = array_merge($_GET, []);
+            unset($baseQ['p']);
+        ?>
+        <?php if ($page > 1): ?>
+            <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>">
+                <i class="fa fa-angle-left"></i>
+            </a>
+        <?php else: ?>
+            <button class="page-arrow" disabled><i class="fa fa-angle-left"></i></button>
+        <?php endif; ?>
 
-                <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                    <a href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $i]))) ?>"
-                    class="<?= $i === $page ? 'active' : '' ?>">
-                        <?= $i ?>
-                    </a>
-                <?php endfor; ?>
+        <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+            <a href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $i]))) ?>"
+               class="<?= $i === $page ? 'active' : '' ?>">
+                <?= $i ?>
+            </a>
+        <?php endfor; ?>
 
-                <?php if ($page < $totalPages): ?>
-                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page + 1]))) ?>">
-                        <i class="fa fa-angle-right"></i>
-                    </a>
-                <?php else: ?>
-                    <button class="page-arrow" disabled><i class="fa fa-angle-right"></i></button>
-                <?php endif; ?>
-            </div>
-        </div>
-
+        <?php if ($page < $totalPages): ?>
+            <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page + 1]))) ?>">
+                <i class="fa fa-angle-right"></i>
+            </a>
+        <?php else: ?>
+            <button class="page-arrow" disabled><i class="fa fa-angle-right"></i></button>
+        <?php endif; ?>
+    </div>
 </div>
 
 </div>
+</div>
 
-<!-- CONFIRM MODAL -->
 <!-- CONFIRM MODAL -->
 <div id="confirmModal" class="modal-overlay" onclick="closeConfirmOutside(event)">
     <div class="modal-box modal-box--sm">
@@ -276,6 +369,8 @@ $totalPages = max(1, ceil($totalDocs / $limit));
 </div>
 
 <script>
+const DOCS_CSRF = <?= json_encode($csrfToken) ?>;
+
 let pendingAction = null;
 let pendingId = null;
 
@@ -351,19 +446,40 @@ function closeConfirmOutside(e) {
 }
 
 function executeAction() {
+    if (!pendingAction || !pendingId) return;
+
     const btn = document.getElementById('confirm-btn');
     btn.disabled = true;
 
     const formData = new FormData();
     formData.append('id', pendingId);
+    formData.append('csrf_token', DOCS_CSRF);
 
     fetch(ACTION_CONFIG[pendingAction].endpoint, { method: 'POST', body: formData })
         .then(r => r.json())
         .then(data => {
-            if (data.success) location.reload();
-            else alert(data.message);
+            if (data.success) {
+                location.reload();
+            } else {
+                alert(data.message || 'Action failed');
+            }
         })
         .catch(() => alert('Server error.'))
         .finally(() => { closeConfirm(); btn.disabled = false; });
+}
+
+/* Debounced search → reload with ?search= */
+let searchTimer;
+const searchInput = document.getElementById('searchInput');
+if (searchInput) {
+    searchInput.addEventListener('input', function () {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+            const url = new URL(window.location.href);
+            url.searchParams.set('search', searchInput.value.trim());
+            url.searchParams.delete('p');
+            window.location.href = url.toString();
+        }, 400);
+    });
 }
 </script>

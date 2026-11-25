@@ -26,7 +26,6 @@ $login_remember = !empty($_COOKIE['remember_user']);
 
 /* ==================================================================
  * POST HANDLING (LOGIN ONLY) — USER PORTAL ONLY
- * Admins & super admins are NOT allowed to authenticate here.
  * ================================================================== */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $page === 'login') {
 
@@ -47,19 +46,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $page === 'login') {
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$user || !password_verify($password, $user['password_hash'])) {
-            // Generic message — do not reveal whether email exists
             $login_error = 'Invalid email or password. Please try again.';
         } else {
             $role = strtolower(trim($user['user_role'] ?? ''));
 
-            // -------- BLOCK ADMIN / SUPER ADMIN FROM USER PORTAL --------
-            if (in_array($role, ['admin', 'super admin'], true)) {
-                // Do NOT create a session. Do NOT set remember cookie.
-                // Generic message so we don't confirm the account type.
+            if (in_array($role, [
+                'admin', 'super admin', 'campus coordinator', 'ovplia staff', 'approving official', 'bor secretary'
+            ], true)) {
                 $login_error = 'Invalid email or password. Please try again.';
-            }
-            // -------- ONLY ALLOW USER-SIDE ROLES --------
-            elseif (in_array($role, ['applicant', 'student', 'faculty', 'user', 'ap'], true)) {
+            } elseif (in_array($role, ['applicant', 'student', 'faculty', 'user', 'ap'], true)) {
 
                 session_regenerate_id(true);
                 $_SESSION['user_id']    = $user['id'];
@@ -84,11 +79,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $page === 'login') {
                     ]);
                 }
 
-                header('Location: ../user/dashboard.php');
+                header('Location: ../user/home.php');
                 exit();
-            }
-            // -------- UNKNOWN ROLE --------
-            else {
+            } else {
                 $login_error = 'Your account does not have access to this portal.';
             }
         }
@@ -96,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $page === 'login') {
 }
 
 /* ==================================================================
- * BROWSE DATA (If routed to browse)
+ * BROWSE DATA
  * ================================================================== */
 $programs = [];
 $loadError = null;
@@ -114,6 +107,7 @@ if ($page === 'browse') {
             LEFT JOIN countries c ON p.country_id = c.id
             LEFT JOIN partners pr ON p.partner_id = pr.id
             WHERE p.status = 'Active'
+              AND p.eligible_account_type = 'Student'
             ORDER BY p.id DESC
         ");
         $stmt->execute();
@@ -133,8 +127,8 @@ if ($page === 'browse') {
 }
 
 $pageTitles = [
-    'login'    => 'Sign In — PSU Internalization',
-    'browse'   => 'PSU Internalization — Student Programs Portal',
+    'login'    => 'Sign In — PSU Internationalization',
+    'browse'   => 'PSU Internationalization — Student Programs Portal',
 ];
 $pageTitle = $pageTitles[$page];
 ?>
@@ -147,354 +141,624 @@ $pageTitle = $pageTitles[$page];
 
     <?php if ($page === 'login'): ?>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-        <style>
-            /* ===== DESIGN TOKENS ===== */
-            :root {
-                --blue:        #1a4a8a;
-                --blue-light:  #2a63b8;
-                --blue-dark:   #0f2c57;
-                --gold:        #e8b830;
-                --gold-light:  #f6d676;
-                --bg:          #eef2f8;
-                --white:       #ffffff;
-                --navy:        #14233d;
-                --gray-700:    #3a4a5e;
-                --gray-500:    #6b7a8f;
-                --gray-400:    #94a3b8;
-                --gray-300:    #cbd5e1;
-                --gray-200:    #e2e8f0;
-                --gray-100:    #f4f7fb;
-                --radius-sm:   10px;
-                --radius:      14px;
-                --radius-lg:   24px;
-                --shadow-lg:   0 24px 64px rgba(15,44,87,0.15);
-                --shadow-md:   0 12px 32px rgba(15,44,87,0.12);
-                --shadow-btn:  0 8px 24px rgba(26,74,138,0.35);
-                --font-body:   'Inter', sans-serif;
-                --font-heading:'Plus Jakarta Sans', sans-serif;
-            }
+<style>
+    /* ===== DESIGN TOKENS ===== */
+    :root {
+        --psu-navy: #0b1a30;
+        --psu-blue: #1c3d6e;
+        --psu-gold: #e4b134;
+        --psu-gold-light: #f4c856;
+        
+        --bg-main: #eef2f7;
+        --white: #ffffff;
+        --text-main: #0f172a;
+        --text-muted: #475569;
+        --text-light: #94a3b8;
+        
+        --border-light: #e2e8f0;
+        --radius-sm: 8px;
+        --radius: 12px;
+        --radius-lg: 20px;
+        --radius-full: 9999px;
+        
+        --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+        --shadow-card: 0 20px 40px -10px rgba(11, 26, 48, 0.1), 0 0 0 1px rgba(11, 26, 48, 0.02);
+        
+        --font-heading: 'Plus Jakarta Sans', sans-serif;
+        --font-body: 'Inter', sans-serif;
+        --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
 
-            *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-            html, body { min-height: 100%; }
-            body {
-                font-family: var(--font-body);
-                background: var(--bg);
-                color: var(--navy);
-                -webkit-font-smoothing: antialiased;
-            }
-            a:focus-visible, button:focus-visible, input:focus-visible {
-                outline: 2px solid var(--blue);
-                outline-offset: 2px;
-            }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { min-height: 100%; }
+    
+    body {
+        font-family: var(--font-body);
+        background-color: var(--bg-main);
+        color: var(--text-main);
+        -webkit-font-smoothing: antialiased;
+        line-height: 1.5;
+        position: relative;
+        overflow-x: hidden;
+    }
 
-            /* ===== PAGE LAYOUT ===== */
-            .page {
-                display: grid;
-                grid-template-columns: minmax(420px, 1fr) 1fr;
-                min-height: 100vh;
-            }
+    /* Background Map Pattern */
+    body::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background-image: url('data:image/svg+xml;utf8,<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path d="M10 10h80v80H10z" fill="none" stroke="%23cbd5e1" stroke-width="0.5" opacity="0.3"/></svg>');
+        background-size: 800px;
+        background-position: center;
+        opacity: 0.8;
+        z-index: -1;
+    }
 
-            /* ===== HERO PANEL (LEFT) ===== */
-            .hero {
-                position: relative;
-                overflow: hidden;
-                color: var(--white);
-                padding: 56px 64px;
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-                background: 
-                    radial-gradient(circle at 100% 0%, rgba(232,184,48,0.2) 0%, transparent 40%),
-                    radial-gradient(circle at 0% 100%, rgba(42,99,184,0.6) 0%, transparent 50%),
-                    linear-gradient(135deg, var(--blue-dark) 0%, var(--blue) 100%);
-                z-index: 1;
-            }
+    /* Decorative Bottom Waves */
+    body::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 25vh;
+        background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 320"><path fill="%230b1a30" fill-opacity="1" d="M0,224L48,213.3C96,203,192,181,288,181.3C384,181,480,203,576,224C672,245,768,267,864,250.7C960,235,1056,181,1152,165.3C1248,149,1344,171,1392,181.3L1440,192L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"></path><path fill="%23e4b134" fill-opacity="1" d="M0,288L48,272C96,256,192,224,288,213.3C384,203,480,213,576,229.3C672,245,768,267,864,261.3C960,256,1056,224,1152,208C1248,192,1344,192,1392,192L1440,192L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"></path></svg>');
+        background-size: cover;
+        background-repeat: no-repeat;
+        background-position: bottom center;
+        z-index: -1;
+    }
 
-            /* Subtle grid pattern */
-            .hero::before {
-                content: '';
-                position: absolute; inset: 0;
-                background-image: 
-                    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
-                background-size: 40px 40px;
-                mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
-                -webkit-mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
-                z-index: -1;
-            }
+    .page {
+        display: flex;
+        width: 100%;
+        min-height: 100vh;
+    }
 
-            /* Animated glowing orbs */
-            .orb {
-                position: absolute;
-                border-radius: 50%;
-                filter: blur(60px);
-                z-index: -1;
-                animation: pulse 8s infinite alternate;
-            }
-            .orb.o1 {
-                width: 400px; height: 400px;
-                background: rgba(232,184,48,0.15);
-                top: -100px; right: -100px;
-            }
-            .orb.o2 {
-                width: 300px; height: 300px;
-                background: rgba(42,99,184,0.3);
-                bottom: -50px; left: -50px;
-                animation-delay: -4s;
-            }
-            @keyframes pulse {
-                0% { transform: scale(1) translate(0, 0); opacity: 0.8; }
-                100% { transform: scale(1.1) translate(20px, 20px); opacity: 1; }
-            }
+    /* ===== LEFT SIDE: HERO ===== */
+    .hero {
+        flex: 1;
+        padding: 60px 80px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        position: relative;
+        z-index: 1;
+    }
 
-            .hero-top, .hero-body, .hero-foot { position: relative; z-index: 2; }
+    .hero-top {
+        position: absolute;
+        top: 60px;
+        left: 80px;
+    }
 
-            /* Brand Logo */
-            .brand {
-                display: inline-flex; align-items: center; gap: 12px;
-                font-family: var(--font-heading);
-                font-weight: 800; font-size: 1.4rem;
-                color: var(--white); text-decoration: none;
-            }
-            .brand .badge {
-                background: var(--gold); color: var(--blue-dark);
-                font-size: 0.75rem; padding: 6px 12px; border-radius: 8px; letter-spacing: 0.5px;
-                box-shadow: 0 4px 16px rgba(232,184,48,0.4);
-            }
-            .brand span.gold { color: var(--gold-light); }
+    .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 16px;
+        text-decoration: none;
+        font-family: var(--font-heading);
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: var(--psu-navy);
+    }
 
-            /* Hero Text */
-            .hero-body { margin: 48px 0; }
-            .eyebrow {
-                display: inline-flex; align-items: center; gap: 10px;
-                background: rgba(255,255,255,0.1);
-                border: 1px solid rgba(255,255,255,0.15);
-                backdrop-filter: blur(10px);
-                padding: 8px 16px; border-radius: 999px;
-                font-size: 0.75rem; font-weight: 600; letter-spacing: 0.5px;
-                margin-bottom: 24px;
-                color: rgba(255,255,255,0.9);
-            }
-            .eyebrow i { 
-                width: 8px; height: 8px; border-radius: 50%; 
-                background: var(--gold); box-shadow: 0 0 12px var(--gold); 
-            }
-            
-            .hero h2 {
-                font-family: var(--font-heading);
-                font-size: clamp(2.2rem, 3.5vw, 3.2rem);
-                line-height: 1.15; font-weight: 800; letter-spacing: -1px;
-                margin-bottom: 20px;
-            }
-            .hero h2 em { 
-                font-style: normal; color: var(--gold); 
-                position: relative; white-space: nowrap; 
-            }
-            .hero p.lead { 
-                color: rgba(255,255,255,0.8); 
-                font-size: 1.05rem; line-height: 1.7; 
-                max-width: 420px; 
-                margin-bottom: 40px;
-            }
+    .brand .badge {
+        background: var(--psu-navy);
+        color: var(--white);
+        font-size: 0.95rem;
+        font-weight: 800;
+        padding: 8px 14px;
+        border-radius: var(--radius-sm);
+        letter-spacing: 0.5px;
+    }
 
-            /* Feature Glass Cards */
-            .features { list-style: none; display: grid; gap: 16px; max-width: 440px; }
-            .features li {
-                display: flex; align-items: center; gap: 16px;
-                background: rgba(255,255,255,0.06);
-                border: 1px solid rgba(255,255,255,0.12);
-                backdrop-filter: blur(12px);
-                padding: 16px 20px; border-radius: var(--radius);
-                transition: all 0.3s ease;
-            }
-            .features li:hover { 
-                transform: translateX(8px); 
-                background: rgba(255,255,255,0.1); 
-                border-color: rgba(255,255,255,0.25);
-            }
-            .features .ico {
-                flex: 0 0 44px; height: 44px; border-radius: 12px;
-                display: grid; place-items: center;
-                background: linear-gradient(135deg, var(--gold), var(--gold-light));
-                color: var(--blue-dark);
-                box-shadow: 0 4px 12px rgba(232,184,48,0.3);
-            }
-            .features strong { display: block; font-family: var(--font-heading); font-size: 1rem; margin-bottom: 4px; }
-            .features small { color: rgba(255,255,255,0.6); font-size: 0.85rem; }
-            
-            .hero-foot { font-size: 0.85rem; color: rgba(255,255,255,0.5); }
+    .brand .divider-line { 
+        width: 2px; 
+        height: 24px; 
+        background: var(--psu-gold); 
+        border-radius: 2px;
+    }
 
-            /* ===== FORM SIDE (RIGHT) ===== */
-            .form-side {
-                display: flex; align-items: center; justify-content: center;
-                padding: 48px 32px;
-                background: var(--gray-100);
-                position: relative;
-            }
+    .hero-body {
+        max-width: 600px;
+        margin-top: 40px;
+    }
 
-            /* Login Card */
-            .login-card {
-                width: 100%; max-width: 460px;
-                background: var(--white);
-                border-radius: var(--radius-lg);
-                box-shadow: var(--shadow-lg);
-                padding: 48px;
-                position: relative; overflow: hidden;
-                animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-            }
-            @keyframes slideUp { 
-                from { opacity: 0; transform: translateY(30px); } 
-                to { opacity: 1; transform: translateY(0); } 
-            }
+    .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        background: var(--white);
+        border: 1px solid rgba(228, 177, 52, 0.4);
+        padding: 8px 24px;
+        border-radius: var(--radius-full);
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--psu-navy);
+        box-shadow: var(--shadow-sm);
+        margin-bottom: 32px;
+    }
 
-            /* Card Top Accent */
-            .login-card::before {
-                content: ''; position: absolute; top: 0; left: 0; right: 0; height: 6px;
-                background: linear-gradient(90deg, var(--blue-dark), var(--blue), var(--gold));
-            }
+    .eyebrow i {
+        width: 20px;
+        height: 20px;
+        background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23e4b134" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>') no-repeat center;
+        display: inline-block;
+    }
 
-            .login-header { margin-bottom: 32px; text-align: center; }
-            .login-header h1 {
-                font-family: var(--font-heading);
-                font-size: 2rem; font-weight: 800; letter-spacing: -0.8px;
-                margin-bottom: 8px; color: var(--navy);
-            }
-            .login-header p { color: var(--gray-500); font-size: 0.95rem; }
+    .hero h2 {
+        font-family: var(--font-heading);
+        font-size: clamp(2.5rem, 4vw, 3.8rem);
+        line-height: 1.1;
+        font-weight: 800;
+        color: var(--psu-navy);
+        letter-spacing: -1px;
+        margin-bottom: 24px;
+    }
 
-            /* Error Alert */
-            .alert-error {
-                background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #ef4444;
-                color: #b91c1c; padding: 16px; border-radius: var(--radius-sm);
-                margin-bottom: 24px; font-size: 0.9rem; font-weight: 500;
-                display: flex; align-items: center; gap: 12px;
-                animation: shake 0.4s ease-in-out;
-            }
-            @keyframes shake {
-                0%, 100% { transform: translateX(0); }
-                25% { transform: translateX(-5px); }
-                75% { transform: translateX(5px); }
-            }
-            .alert-error svg { width: 20px; height: 20px; flex-shrink: 0; }
+    .hero h2 em {
+        color: var(--psu-gold);
+        font-style: normal;
+    }
 
-            /* Input Fields */
-            .form-group { margin-bottom: 20px; }
-            .form-label { display: block; font-size: 0.85rem; font-weight: 600; color: var(--gray-700); margin-bottom: 8px; }
-            
-            .input-wrap { position: relative; }
-            .input-wrap > svg.lead-ic {
-                position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
-                width: 20px; height: 20px; color: var(--gray-400); pointer-events: none; transition: color 0.2s;
-            }
-            
-            .form-input {
-                width: 100%; padding: 16px 16px 16px 48px;
-                border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm);
-                font-family: var(--font-body); font-size: 0.95rem; color: var(--navy);
-                background: var(--white); transition: all 0.2s ease;
-            }
-            .form-input:hover { border-color: var(--gray-300); background: var(--gray-100); }
-            .form-input:focus {
-                outline: none; background: var(--white);
-                border-color: var(--blue); box-shadow: 0 0 0 4px rgba(26,74,138,0.1);
-            }
-            .input-wrap:focus-within > svg.lead-ic { color: var(--blue); }
-            .form-input::placeholder { color: var(--gray-400); }
-            
-            .toggle-pw {
-                position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
-                background: none; border: none; cursor: pointer; padding: 8px; color: var(--gray-400);
-                display: grid; place-items: center; border-radius: 8px; transition: all 0.2s;
-            }
-            .toggle-pw:hover { color: var(--blue); background: var(--gray-100); }
+    .hero .lead {
+        font-size: 1.15rem;
+        color: var(--text-muted);
+        line-height: 1.7;
+        margin-bottom: 56px;
+        max-width: 500px;
+    }
 
-            /* Options */
-            .form-options {
-                display: flex; justify-content: space-between; align-items: center;
-                font-size: 0.88rem; margin-bottom: 28px; margin-top: 4px;
-            }
-            .form-options label {
-                display: flex; align-items: center; gap: 8px; cursor: pointer;
-                color: var(--gray-700); font-weight: 500;
-            }
-            .form-options input[type="checkbox"] { 
-                width: 18px; height: 18px; accent-color: var(--blue); cursor: pointer; 
-                border-radius: 4px;
-            }
-            .form-options a { color: var(--blue); text-decoration: none; font-weight: 600; transition: color 0.2s; }
-            .form-options a:hover { color: var(--blue-dark); text-decoration: underline; }
+    .features {
+        list-style: none;
+        display: flex;
+        gap: 32px;
+        padding-top: 32px;
+        border-top: 1px solid rgba(11, 26, 48, 0.1);
+    }
 
-            /* Submit Button */
-            .btn-submit {
-                width: 100%;
-                background: linear-gradient(135deg, var(--blue) 0%, var(--blue-light) 100%);
-                color: var(--white); border: none; border-radius: var(--radius-sm);
-                font-family: var(--font-heading); font-size: 1.05rem; font-weight: 700;
-                padding: 16px; cursor: pointer; transition: all 0.3s ease;
-                box-shadow: var(--shadow-btn);
-                position: relative; overflow: hidden;
-                display: flex; align-items: center; justify-content: center; gap: 8px;
-            }
-            .btn-submit::after {
-                content: ''; position: absolute; top: 0; left: -100%; width: 50%; height: 100%;
-                background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-                transition: left 0.5s ease;
-            }
-            .btn-submit:hover { 
-                transform: translateY(-2px); 
-                box-shadow: 0 12px 28px rgba(26,74,138,0.45); 
-            }
-            .btn-submit:hover::after { left: 150%; }
-            .btn-submit:active { transform: translateY(0); }
+    .features li {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 12px;
+        flex: 1;
+        position: relative;
+    }
 
-            /* Divider */
-            .divider {
-                display: flex; align-items: center; text-align: center; margin: 28px 0;
-                color: var(--gray-400); font-size: 0.8rem; font-weight: 600;
-                text-transform: uppercase; letter-spacing: 0.8px;
-            }
-            .divider::before, .divider::after { content: ''; flex: 1; border-bottom: 1.5px solid var(--gray-200); }
-            .divider::before { margin-right: 20px; }
-            .divider::after { margin-left: 20px; }
+    .features li:not(:last-child)::after {
+        content: '';
+        position: absolute;
+        right: -16px;
+        top: 20%;
+        height: 60%;
+        width: 1px;
+        background: rgba(11, 26, 48, 0.1);
+    }
 
-            /* Register Button */
-            .btn-register {
-                width: 100%; background: var(--white); color: var(--blue);
-                border: 2px solid var(--gray-200); border-radius: var(--radius-sm);
-                font-family: var(--font-heading); font-size: 1rem; font-weight: 700;
-                padding: 14px; cursor: pointer; transition: all 0.25s ease;
-                text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px;
-            }
-            .btn-register:hover { 
-                background: var(--gray-100); border-color: var(--blue); 
-                transform: translateY(-2px); 
-            }
-            .btn-register svg { transition: transform 0.25s ease; }
-            .btn-register:hover svg { transform: translateX(4px); }
+    .features .ico {
+        width: 48px;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--psu-navy);
+    }
 
-            /* Footer */
-            .login-footer { text-align: center; margin-top: 32px; font-size: 0.8rem; color: var(--gray-400); line-height: 1.6; }
-            .login-footer a { color: var(--blue); text-decoration: none; font-weight: 600; }
-            .login-footer a:hover { text-decoration: underline; }
+    .features strong {
+        font-family: var(--font-heading);
+        font-size: 0.95rem;
+        color: var(--psu-navy);
+        font-weight: 700;
+        line-height: 1.3;
+    }
 
-            /* ===== RESPONSIVE ===== */
-            @media (max-width: 1024px) {
-                .hero { padding: 40px; }
-                .hero h2 { font-size: 2.2rem; }
-            }
-            @media (max-width: 860px) {
-                .page { grid-template-columns: 1fr; }
-                .hero { display: none; /* Hide hero on tablets/mobile for focus */ }
-                .form-side { padding: 32px 16px; background: var(--bg); }
-                .login-card { padding: 36px 28px; box-shadow: var(--shadow-md); }
-            }
-            @media (max-width: 480px) {
-                .login-card { padding: 28px 20px; border-radius: var(--radius); }
-                .login-header h1 { font-size: 1.7rem; }
-            }
-            @media (prefers-reduced-motion: reduce) {
-                *, *::before, *::after { animation: none !important; transition: none !important; }
-            }
-        </style>
+    .hero-foot {
+        position: absolute;
+        bottom: 40px;
+        left: 80px;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+    }
+
+    /* ===== RIGHT SIDE: FORM CARD ===== */
+    .form-side {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 40px 80px 40px 20px;
+        position: relative;
+        z-index: 2;
+    }
+
+    .login-card {
+        background: var(--white);
+        width: 100%;
+        max-width: 460px;
+        border-radius: var(--radius-lg);
+        padding: 48px;
+        box-shadow: var(--shadow-card);
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        position: relative;
+        margin-top: 40px;
+        margin-bottom: 40px;
+    }
+
+    .login-header {
+        text-align: center;
+        margin-bottom: 32px;
+    }
+
+    .user-plus-icon {
+        width: 64px;
+        height: 64px;
+        background: var(--bg-main);
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 20px;
+        position: relative;
+    }
+    
+    .user-plus-icon svg { color: var(--psu-navy); }
+
+    .user-plus-icon::after {
+        content: '+';
+        position: absolute;
+        right: 0px;
+        bottom: 0px;
+        background: var(--psu-gold);
+        color: var(--white);
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        font-weight: 700;
+        border: 3px solid var(--white);
+    }
+
+    .login-header h1 {
+        font-family: var(--font-heading);
+        font-size: 2.2rem;
+        color: var(--psu-navy);
+        font-weight: 800;
+        margin-bottom: 8px;
+    }
+
+    .login-header p {
+        color: var(--text-muted);
+        font-size: 0.95rem;
+    }
+
+    /* Alerts */
+    .alert-error {
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        color: #b91c1c;
+        padding: 16px;
+        border-radius: var(--radius-sm);
+        margin-bottom: 24px;
+        font-size: 0.9rem;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        animation: shake 0.4s ease-in-out;
+    }
+
+    @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-5px); }
+        75% { transform: translateX(5px); }
+    }
+
+    /* Input Fields */
+    .form-group { margin-bottom: 20px; }
+    .form-label { 
+        display: block; 
+        font-size: 0.85rem; 
+        font-weight: 700; 
+        color: var(--psu-navy); 
+        margin-bottom: 8px; 
+    }
+    
+    .input-wrap { position: relative; }
+    .input-wrap > svg.lead-ic {
+        position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
+        width: 20px; height: 20px; color: var(--text-light); pointer-events: none; transition: color 0.2s;
+    }
+    
+    .form-input {
+        width: 100%; padding: 14px 16px 14px 48px;
+        border: 1px solid var(--border-light); border-radius: var(--radius-sm);
+        font-family: var(--font-body); font-size: 0.95rem; color: var(--text-main);
+        background: var(--white); transition: var(--transition);
+    }
+    
+    .form-input:focus {
+        outline: none;
+        border-color: var(--psu-navy);
+        box-shadow: 0 0 0 3px rgba(11, 26, 48, 0.05);
+    }
+    
+    .input-wrap:focus-within > svg.lead-ic { color: var(--psu-navy); }
+    .form-input::placeholder { color: var(--text-light); }
+    
+    .toggle-pw {
+        position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+        background: none; border: none; cursor: pointer; padding: 4px; color: var(--text-light);
+        display: grid; place-items: center; transition: var(--transition);
+    }
+    
+    .toggle-pw:hover { color: var(--psu-navy); }
+
+    /* Options */
+    .form-options {
+        display: flex; justify-content: space-between; align-items: center;
+        font-size: 0.85rem; margin-bottom: 24px; margin-top: 4px;
+    }
+    
+    .form-options label {
+        display: flex; align-items: center; gap: 8px; cursor: pointer;
+        color: var(--text-main); font-weight: 500;
+    }
+    
+    .form-options input[type="checkbox"] { 
+        width: 16px; height: 16px; accent-color: var(--psu-navy); cursor: pointer; 
+        border-radius: 4px;
+    }
+    
+    .form-options a { 
+        color: var(--psu-navy); text-decoration: none; font-weight: 700; transition: var(--transition); 
+    }
+    
+    .form-options a:hover { text-decoration: underline; }
+
+    /* Buttons */
+    .btn-submit {
+        width: 100%;
+        background: var(--psu-navy);
+        color: var(--white); 
+        border: none; border-radius: var(--radius-full);
+        font-family: var(--font-heading); font-size: 1rem; font-weight: 700;
+        padding: 16px; cursor: pointer; transition: var(--transition);
+        display: flex; align-items: center; justify-content: center; gap: 8px;
+        position: relative;
+    }
+    
+    .btn-submit:hover { 
+        background: var(--psu-blue);
+        transform: translateY(-1px);
+        box-shadow: 0 6px 20px rgba(11, 26, 48, 0.2);
+    }
+
+    .btn-submit.loading {
+        pointer-events: none;
+        color: transparent;
+    }
+    .btn-submit.loading svg {
+        display: none;
+    }
+
+    /* Divider */
+    .divider {
+        display: flex; align-items: center; text-align: center; margin: 24px 0;
+        color: var(--text-light); font-size: 0.75rem; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    
+    .divider::before, .divider::after { content: ''; flex: 1; border-bottom: 1px solid var(--border-light); }
+    .divider::before { margin-right: 16px; }
+    .divider::after { margin-left: 16px; }
+
+    /* Register Button */
+    .btn-register {
+        width: 100%; 
+        background: var(--white); 
+        color: var(--psu-navy);
+        border: 1px solid var(--border-light); 
+        border-radius: var(--radius-full);
+        font-family: var(--font-heading); font-size: 0.95rem; font-weight: 700;
+        padding: 14px; cursor: pointer; transition: var(--transition);
+        text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    
+    .btn-register:hover { 
+        background: var(--bg-main); 
+        border-color: var(--psu-navy);
+    }
+
+    /* Footer */
+    .login-footer { 
+        text-align: center; 
+        margin-top: 32px; 
+        font-size: 0.8rem; 
+        color: var(--text-light); 
+        line-height: 1.6; 
+    }
+    
+    .login-footer a { 
+        color: var(--psu-navy); 
+        text-decoration: none; 
+        font-weight: 600; 
+    }
+    
+    .login-footer a:hover { text-decoration: underline; }
+
+    /* ===== FULL SCREEN AIRPLANE LOADING OVERLAY ===== */
+    .loading-overlay {
+        position: fixed;
+        inset: 0;
+        background: #0a192f;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.4s ease, visibility 0.4s ease;
+    }
+    .loading-overlay.active {
+        opacity: 1;
+        visibility: visible;
+    }
+
+    .flight-container {
+        position: relative;
+        width: 100%;
+        max-width: 800px;
+        height: 200px;
+        margin-bottom: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .flight-path {
+        position: absolute;
+        top: 50%;
+        left: 10%;
+        width: 80%;
+        height: 100px;
+        border-top: 2px dashed rgba(255, 255, 255, 0.15);
+        border-radius: 50% / 100% 100% 0 0;
+        transform: translateY(-50%) rotate(-5deg);
+    }
+
+    .airplane {
+        position: absolute;
+        top: 40%;
+        left: -10%;
+        width: 80px;
+        height: 80px;
+        color: #ffffff;
+        transform: translateY(-50%) rotate(15deg);
+        /* SLOWED DOWN: 20 seconds */
+        animation: flyAcross 20s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        filter: drop-shadow(0 0 15px rgba(59, 130, 246, 0.8)) drop-shadow(0 0 30px rgba(59, 130, 246, 0.5));
+        z-index: 2;
+    }
+
+    .light-trail {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        width: 100%;
+        height: 4px;
+        background: linear-gradient(90deg, transparent, #3b82f6, #ffffff);
+        transform: translateY(-50%);
+        opacity: 0;
+        /* SLOWED DOWN: 20 seconds */
+        animation: trailGlow 20s ease-out forwards;
+        border-radius: 4px;
+        filter: blur(2px);
+        z-index: 1;
+    }
+
+    @keyframes flyAcross {
+        0% {
+            left: -10%;
+            opacity: 0;
+            transform: translateY(10px) rotate(15deg) scale(0.8);
+        }
+        10% {
+            opacity: 1;
+        }
+        50% {
+            transform: translateY(-20px) rotate(5deg) scale(1);
+        }
+        90% {
+            opacity: 1;
+            left: 110%;
+            transform: translateY(-30px) rotate(0deg) scale(1);
+        }
+        100% {
+            left: 110%;
+            opacity: 0;
+        }
+    }
+
+    @keyframes trailGlow {
+        0% { opacity: 0; width: 0%; left: 0; }
+        20% { opacity: 1; }
+        80% { opacity: 1; width: 100%; }
+        100% { opacity: 0; width: 100%; }
+    }
+
+    .loading-text {
+        font-family: 'Inter', sans-serif;
+        font-size: 2.5rem;
+        color: #ffffff;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+        margin-bottom: 12px;
+    }
+    .loading-subtext {
+        font-family: 'Inter', sans-serif;
+        font-size: 1.1rem;
+        color: #94a3b8;
+        margin-bottom: 40px;
+    }
+
+    /* Progress Bar */
+    .progress-bar-container {
+        width: 100%;
+        max-width: 450px;
+        height: 8px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 999px;
+        overflow: hidden;
+        position: relative;
+    }
+    .progress-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #2563eb, #3b82f6, #60a5fa);
+        border-radius: 999px;
+        width: 0%;
+        box-shadow: 0 0 15px rgba(59, 130, 246, 0.6);
+        transition: width 0.1s linear;
+    }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 1024px) {
+        .hero { padding: 40px; }
+        .hero-top { top: 40px; left: 40px; }
+        .hero h2 { font-size: 2.8rem; }
+        .form-side { padding: 40px; }
+    }
+    
+    @media (max-width: 860px) {
+        .page { flex-direction: column; }
+        .hero { 
+            padding: 100px 24px 40px; 
+            align-items: center; 
+            text-align: center; 
+        }
+        .hero-top { top: 30px; left: 50%; transform: translateX(-50%); width: 100%; display: flex; justify-content: center; }
+        .hero .lead { margin: 0 auto 40px; }
+        .features { display: none; }
+        .hero-foot { position: relative; bottom: 0; left: 0; margin-top: 40px; }
+        .form-side { padding: 0 24px 40px; }
+        .login-card { margin-top: 0; }
+    }
+    
+    @media (max-width: 480px) {
+        .login-card { padding: 32px 24px; }
+        .login-header h1 { font-size: 1.8rem; }
+        .flight-container { height: 120px; }
+        .airplane { width: 60px; height: 60px; }
+        .loading-text { font-size: 1.8rem; }
+        .loading-subtext { font-size: 0.95rem; }
+        .progress-bar-container { max-width: 280px; }
+    }
+</style>
     <?php else: ?>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
         <link rel="stylesheet" href="../asset/css/website.css">
@@ -505,59 +769,77 @@ $pageTitle = $pageTitles[$page];
 
 <?php if ($page === 'login'): ?>
 
-    <!-- ============================== LOGIN ============================== -->
-    <div class="page">
+    <!-- Cinematic Airplane Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="flight-container">
+            <div class="flight-path"></div>
+            <div class="light-trail"></div>
+            <svg class="airplane" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                <path d="M21.989 2.011C21.989 2.011 17.959 1.441 14.109 1.611C10.259 1.781 3.12 6.44 2.989 7.33C2.859 8.22 8.239 8.33 8.239 8.33C8.239 8.33 8.869 11.86 10.349 13.85C11.829 15.84 15.369 16.42 15.369 16.42C15.369 16.42 15.499 21.69 16.369 21.55C17.239 21.41 21.839 14.29 22.009 10.49C22.179 6.69 21.989 2.011 21.989 2.011Z" />
+            </svg>
+        </div>
+        <div class="loading-text">Welcome back!</div>
+        <div class="loading-subtext">Loading your dashboard...</div>
+        
+        <div class="progress-bar-container">
+            <div class="progress-bar-fill" id="progressBarFill"></div>
+        </div>
+    </div>
 
+    <div class="page">
         <!-- HERO PANEL -->
         <aside class="hero">
-            <div class="orb o1"></div>
-            <div class="orb o2"></div>
-
             <div class="hero-top">
-                <a href="website.php" class="brand"><span class="badge">PSU</span> PSU <span class="gold">Internalization</span></a>
+                <a href="website.php" class="brand">
+                    <span class="badge">PSU</span> 
+                    <div class="divider-line"></div>
+                    PSU Internationalization
+                </a>
             </div>
 
             <div class="hero-body">
                 <div class="eyebrow"><i></i> Student Mobility &amp; Internship Portal</div>
                 <h2>Welcome back to your <em>global</em> journey.</h2>
-                <p class="lead">Sign in to continue your applications, track your status, and discover new international programs from Pangasinan State University and its partners.</p>
+                <p class="lead">Sign in to continue your applications, track your status, and discover new international programs from Pangasinan State University.</p>
 
                 <ul class="features">
                     <li>
-                        <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg></div>
-                        <div><strong>Exchange &amp; study abroad</strong><small>Programs with partner institutions worldwide</small></div>
+                        <div class="ico"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
+                        <div><strong>Explore<br>Programs</strong></div>
                     </li>
                     <li>
-                        <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg></div>
-                        <div><strong>Internships &amp; research</strong><small>Gain hands-on international experience</small></div>
+                        <div class="ico"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+                        <div><strong>Build<br>Global Connections</strong></div>
                     </li>
                     <li>
-                        <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></div>
-                        <div><strong>Real-time updates</strong><small>Know where every application stands</small></div>
+                        <div class="ico"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg></div>
+                        <div><strong>Broaden<br>Your Horizons</strong></div>
                     </li>
                 </ul>
             </div>
 
-            <div class="hero-foot">&copy; <?= date('Y') ?> Pangasinan State University &middot; Internalization Office</div>
+            <div class="hero-foot">&copy; <?= date('Y') ?> Pangasinan State University &middot; Internationalization Office</div>
         </aside>
 
         <!-- FORM SIDE -->
         <main class="form-side">
             <div class="login-card">
-
                 <div class="login-header">
+                    <div class="user-plus-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+                    </div>
                     <h1>Welcome Back</h1>
-                    <p>Sign in to your PSU Internalization account</p>
+                    <p>Sign in to your PSU Internationalization account</p>
                 </div>
 
                 <?php if ($login_error): ?>
                     <div class="alert-error">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                        <?= e($login_error) ?>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <div><?= e($login_error) ?></div>
                     </div>
                 <?php endif; ?>
 
-                <form method="POST" action="?page=login">
+                <form method="POST" action="?page=login" id="loginForm">
                     <div class="form-group">
                         <label class="form-label" for="username">Email Address</label>
                         <div class="input-wrap">
@@ -590,13 +872,13 @@ $pageTitle = $pageTitles[$page];
                         <a href="user_forgot_pass.php">Forgot password?</a>
                     </div>
 
-                    <button type="submit" class="btn-submit">
-                        Sign In
+                    <button type="submit" class="btn-submit" id="submitBtn">
+                        <span>Sign In</span>
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                     </button>
                 </form>
 
-                <div class="divider">New to PSU Internalization?</div>
+                <div class="divider">OR</div>
 
                 <a href="register.php" class="btn-register">
                     Create an Account
@@ -604,34 +886,62 @@ $pageTitle = $pageTitles[$page];
                 </a>
 
                 <div class="login-footer">
-                    By signing in, you agree to our <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a>.
+                    By signing in, you agree to our <a href="#">Terms of Service</a> and<br><a href="#">Privacy Policy</a>.
                 </div>
-
             </div>
         </main>
     </div>
 
-    <script>
-        function togglePw() {
-            const pw = document.getElementById('password');
-            const icon = document.getElementById('eye-icon');
-            if (pw.type === 'password') {
-                pw.type = 'text';
-                // Change to 'eye off' icon
-                icon.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>';
-            } else {
-                pw.type = 'password';
-                // Change back to 'eye' icon
-                icon.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
-            }
+<script>
+    function togglePw() {
+        const pw = document.getElementById('password');
+        const icon = document.getElementById('eye-icon');
+        if (pw.type === 'password') {
+            pw.type = 'text';
+            icon.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>';
+        } else {
+            pw.type = 'password';
+            icon.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
         }
-    </script>
+    }
+
+    // Handle login loading state
+    document.getElementById('loginForm').addEventListener('submit', function(e) {
+        // Show full screen overlay
+        document.getElementById('loadingOverlay').classList.add('active');
+        
+        // Add loading state to button (hides text and icon)
+        const btn = document.getElementById('submitBtn');
+        btn.classList.add('loading');
+
+        // Animate the progress bar from 0 to 100 over 20 seconds
+        let progress = 0;
+        const progressBar = document.getElementById('progressBarFill');
+        
+        const interval = setInterval(() => {
+            // Increment smoothly by a small amount every 100ms
+            // (0.5 * 200 ticks = 100%)
+            progress += 0.5; 
+            
+            if (progress > 100) {
+                progress = 100;
+            }
+            
+            progressBar.style.width = progress + '%';
+
+            // Stop when full
+            if (progress >= 100) {
+                clearInterval(interval);
+            }
+        }, 100);
+    });
+</script>
 
 <?php elseif ($page === 'browse'): ?>
 
     <!-- ============================== BROWSE PROGRAMS ============================== -->
     <nav>
-      <div class="nav-logo">PSU <span>Internalization</span></div>
+      <div class="nav-logo">PSU <span>Internationalization</span></div>
       <ul class="nav-links">
         <li><a href="?page=browse">Browse Programs</a></li>
         <li><a href="partner_ins.php">Partner Institutions</a></li>
@@ -762,7 +1072,7 @@ $pageTitle = $pageTitles[$page];
     </div>
 
     <footer>
-      <strong>PSU Internalization Management System</strong><br/>
+      <strong>PSU Internationalization Management System</strong><br/>
       Pangasinan State University · Office of International Affairs · <a href="#" style="color:rgba(255,255,255,.55)">Contact Us</a>
     </footer>
 
@@ -916,7 +1226,7 @@ $pageTitle = $pageTitles[$page];
           <div class="meta-item"><div class="label">Duration</div><div class="value">${p.duration}</div></div>
           <div class="meta-item"><div class="label">Application Deadline</div><div class="value">${p.deadline}</div></div>
           <div class="meta-item"><div class="label">Country</div><div class="value">${p.country}</div></div>`;
-        document.getElementById('applyLink').href = '../user/dashboard.php?page=apply&program_id=' + p.id;
+        document.getElementById('applyLink').href = '?page=apply_program&program_id=' + p.id;
         document.getElementById('modalOverlay').classList.add('open');
       }
 

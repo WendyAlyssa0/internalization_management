@@ -1,13 +1,23 @@
 <?php
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/roles.php'; // Includes session_start()
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
+/* =========================
+   AUTHENTICATION
+========================= */
 if (!isset($_SESSION['user_id'])) {
     header('Location: ../public/login.php');
     exit();
+}
+
+/* =========================
+   AUTHORIZATION (Strictly Admins)
+   Based on the DFD, the Administrator receives "Activity logs".
+   Approvers, Coordinators, and Applicants should NOT see this.
+========================= */
+if (!canManageSystem()) { // Checks for 'admin' or 'super_admin'
+    http_response_code(403);
+    exit('Forbidden — only Administrators can view the Audit Trail.');
 }
 
 $pdo = db();
@@ -44,8 +54,11 @@ $stmt = $pdo->prepare("
     ORDER BY created_at DESC
     LIMIT :limit OFFSET :offset
 ");
-foreach ($params as $key => $val) {
-    $stmt->bindValue($key + 1, $val);
+
+// Fix parameter binding (using named parameters for limit/offset is safer)
+$i = 1;
+foreach ($params as $val) {
+    $stmt->bindValue($i++, $val);
 }
 $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
 $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -69,6 +82,8 @@ function actionIcon($action)
         str_contains($action, 'delete') => 'fa-solid fa-trash',
         str_contains($action, 'login')  => 'fa-solid fa-right-to-bracket',
         str_contains($action, 'logout') => 'fa-solid fa-right-from-bracket',
+        str_contains($action, 'approve')=> 'fa-solid fa-check',
+        str_contains($action, 'reject') => 'fa-solid fa-xmark',
         str_contains($action, 'view')   => 'fa-solid fa-eye',
         default                         => 'fa-solid fa-circle-dot',
     };
@@ -83,6 +98,8 @@ function actionTone($action)
         str_contains($action, 'delete') => 'tone-error',
         str_contains($action, 'login')  => 'tone-info',
         str_contains($action, 'logout') => 'tone-warning',
+        str_contains($action, 'approve')=> 'tone-success',
+        str_contains($action, 'reject') => 'tone-error',
         str_contains($action, 'view')   => 'tone-neutral',
         default                         => 'tone-neutral',
     };
@@ -129,7 +146,7 @@ function actionTone($action)
                                 <div class="action-icon <?= h($tone) ?>">
                                     <i class="<?= h($icon) ?>"></i>
                                 </div>
-                                <span style="font-weight:600; color:#0f172a;"><?= h($log['action']) ?></span>
+                                <span style="font-weight:600; color:#0f172a;"><?= h(ucwords(str_replace('_', ' ', $log['action']))) ?></span>
                             </div>
                         </td>
                         <td style="color:#475569;">

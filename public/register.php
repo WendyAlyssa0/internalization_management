@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/../config/db.php';
+$departmentOptions = require __DIR__ . '/../config/academic_departments.php';
 
 $pdo = db();
 
@@ -21,13 +22,15 @@ $reg_suffix      = '';
 $reg_email       = '';
 $reg_sex         = '';
 $reg_dob         = '';
-$reg_student_id  = '';
+$reg_id_number   = ''; 
 
-$reg_department  = '';
-$reg_program     = '';
-$reg_year_level  = '';
-$reg_institution = 'Pangasinan State University';
-$reg_term        = '';
+$reg_account_type = 'Student'; 
+$reg_department   = '';
+$reg_program      = '';
+$reg_year_level   = '';
+$reg_faculty_rank = ''; 
+$reg_institution  = 'Pangasinan State University';
+$reg_term         = '';
 
 $reg_step = 1; 
 
@@ -35,7 +38,6 @@ $reg_step = 1;
  * POST HANDLING
  * ================================================================== */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-
     // Step 1
     $reg_first_name  = trim($_POST['first_name'] ?? '');
     $reg_middle_name = trim($_POST['middle_name'] ?? '');
@@ -43,15 +45,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $reg_suffix      = trim($_POST['suffix'] ?? '');
     $reg_sex         = trim($_POST['sex'] ?? '');
     $reg_dob         = trim($_POST['date_of_birth'] ?? '');
-    $reg_student_id  = trim($_POST['student_id_number'] ?? '');
+    $reg_id_number   = trim($_POST['id_number'] ?? ''); 
 
     // Step 2
     $reg_email       = trim($_POST['email'] ?? '');
 
     // Step 3
+    $accountTypeInput = $_POST['account_type'] ?? 'Student';
+    $reg_account_type = is_string($accountTypeInput) ? trim($accountTypeInput) : '';
     $reg_department  = trim($_POST['department'] ?? '');
-    $reg_program     = trim($_POST['program'] ?? '');
-    $reg_year_level  = trim($_POST['year_level'] ?? '');
+
+    if (!in_array($reg_account_type, ['Student', 'Faculty'], true)) {
+        $reg_errors[] = 'Please select a valid account type.';
+        $reg_account_type = 'Student';
+        $reg_step = 3;
+    }
+    
+    if ($reg_account_type === 'Student') {
+        $reg_program = trim($_POST['program'] ?? '');
+        $reg_year_level = trim($_POST['year_level'] ?? '');
+        $reg_faculty_rank = null;
+    } else {
+        $reg_faculty_rank = trim($_POST['faculty_rank'] ?? '');
+        $reg_program = null; 
+        $reg_year_level = null;
+    }
+    
     $reg_institution = trim($_POST['institution'] ?? '');
     $reg_term        = trim($_POST['term'] ?? '');
 
@@ -61,12 +80,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $agree_terms     = isset($_POST['agree_terms']);
 
     $role = 'applicant';
-    
-    // FIX: Matches DB Enum exactly
     $allowedSex = ['Male', 'Female', 'Prefer not to say'];
 
-    // --- STEP 1 VALIDATION ---
-    if ($reg_first_name === '' || $reg_last_name === '' || $reg_student_id === '') {
+    // Validation logic
+    if ($reg_first_name === '' || $reg_last_name === '' || $reg_id_number === '') {
         $reg_errors[] = 'Please fill in all required personal fields.';
         $reg_step = 1;
     }
@@ -90,7 +107,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // --- STEP 2 VALIDATION ---
     if ($reg_email === '') {
         $reg_errors[] = 'Please enter your email address.';
         if ($reg_step === 1) $reg_step = 2;
@@ -99,13 +115,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($reg_step === 1) $reg_step = 2;
     }
 
-    // --- STEP 3 VALIDATION ---
-    if ($reg_department === '' || $reg_program === '' || $reg_year_level === '') {
-        $reg_errors[] = 'Please complete all academic details.';
+    if (!array_key_exists($reg_department, $departmentOptions)) {
+        $reg_errors[] = 'Please select a valid department.';
         if ($reg_step <= 3) $reg_step = 3;
     }
+    
+    if ($reg_account_type === 'Student') {
+        if ($reg_program === '' || $reg_year_level === '') {
+            $reg_errors[] = 'Please complete all student academic details.';
+            if ($reg_step <= 3) $reg_step = 3;
+        }
+    } else {
+        if ($reg_faculty_rank === '') {
+            $reg_errors[] = 'Please select your faculty rank.';
+            if ($reg_step <= 3) $reg_step = 3;
+        }
+    }
 
-    // --- STEP 4 VALIDATION ---
     if ($password === '' || $confirm === '') {
         $reg_errors[] = 'Please create a password.';
         if ($reg_step < 4) $reg_step = 4;
@@ -118,7 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($reg_step < 4) $reg_step = 4;
     }
 
-    // --- SAVE TO DATABASE ---
+    // Save to database
     if (!$reg_errors) {
         $check = $pdo->prepare("SELECT id FROM users WHERE email = :email");
         $check->execute([':email' => $reg_email]);
@@ -128,14 +154,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $reg_step = 2;
         } else {
             try {
-                // FIX: Changed 'date_of_birth' to 'birthdate'
                 $stmt = $pdo->prepare("
                     INSERT INTO users (
-                        first_name, middle_name, last_name, suffix, email,
-                        password_hash, sex, birthdate, student_id_number, user_role, status
+                        first_name, middle_name, last_name, suffix, email, department,
+                        program, year_level, faculty_rank,
+                        password_hash, sex, birthdate, student_id_number, user_role, account_type, status
                     ) VALUES (
-                        :first_name, :middle_name, :last_name, :suffix, :email,
-                        :password_hash, :sex, :birthdate, :student_id_number, :user_role, :status
+                        :first_name, :middle_name, :last_name, :suffix, :email, :department,
+                        :program, :year_level, :faculty_rank,
+                        :password_hash, :sex, :birthdate, :id_number, :user_role, :account_type, :status
                     )
                 ");
 
@@ -145,12 +172,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ':last_name'          => $reg_last_name,
                     ':suffix'             => $reg_suffix !== '' ? $reg_suffix : null,
                     ':email'              => $reg_email,
+                    ':department'         => $reg_department,
+                    ':program'            => $reg_program,
+                    ':year_level'         => $reg_year_level,
+                    ':faculty_rank'       => $reg_faculty_rank,
                     ':password_hash'      => password_hash($password, PASSWORD_DEFAULT),
                     ':sex'                => $reg_sex,
-                    ':birthdate'          => $dobForDb, // FIX: Changed key
-                    ':student_id_number'  => $reg_student_id,
+                    ':birthdate'          => $dobForDb,
+                    ':id_number'          => $reg_id_number,
                     ':user_role'          => $role,
-                    ':status'             => 'active', // FIX: Lowercase enum
+                    ':account_type'       => $reg_account_type,
+                    ':status'             => 'active',
                 ]);
 
                 if ($result) {
@@ -161,7 +193,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
             } catch (PDOException $ex) {
-                // FIX: Show the REAL error instead of hiding it
                 $reg_errors[] = 'Database error: ' . $ex->getMessage();
             }
         }
@@ -173,53 +204,768 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Create Account — PSU Internalization</title>
+    <title>Create Account — PSU Internationalization</title>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link href="../asset/css/register.css" rel="stylesheet">
+    <style>
+        /* ===== CSS DESIGN TOKENS ===== */
+        :root {
+            --psu-navy: #0b1a30;
+            --psu-blue: #1c3d6e;
+            --psu-gold: #e4b134;
+            --psu-gold-light: #f4c856;
+            
+            --bg-main: #eef2f7; /* Deepened background */
+            --white: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --text-light: #94a3b8;
+            
+            --border-light: #e2e8f0;
+            
+            --radius-sm: 8px;
+            --radius: 12px;
+            --radius-lg: 20px;
+            --radius-full: 9999px;
+            
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow-card: 0 20px 40px -10px rgba(11, 26, 48, 0.1), 0 0 0 1px rgba(11, 26, 48, 0.02);
+            
+            --font-heading: 'Plus Jakarta Sans', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
 
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: var(--font-body);
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            -webkit-font-smoothing: antialiased;
+            line-height: 1.5;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        /* Background Map Pattern */
+        body::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image: url('data:image/svg+xml;utf8,<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path d="M10 10h80v80H10z" fill="none" stroke="%23cbd5e1" stroke-width="0.5" opacity="0.3"/></svg>');
+            background-size: 800px;
+            background-position: center;
+            opacity: 0.8;
+            z-index: -1;
+        }
+
+        /* Decorative Bottom Waves */
+        body::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 25vh;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 320"><path fill="%230b1a30" fill-opacity="1" d="M0,224L48,213.3C96,203,192,181,288,181.3C384,181,480,203,576,224C672,245,768,267,864,250.7C960,235,1056,181,1152,165.3C1248,149,1344,171,1392,181.3L1440,192L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"></path><path fill="%23e4b134" fill-opacity="1" d="M0,288L48,272C96,256,192,224,288,213.3C384,203,480,213,576,229.3C672,245,768,267,864,261.3C960,256,1056,224,1152,208C1248,192,1344,192,1392,192L1440,192L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"></path></svg>');
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-position: bottom center;
+            z-index: -1;
+        }
+
+        .page {
+            display: flex;
+            width: 100%;
+            min-height: 100vh;
+        }
+
+        /* ===== LEFT SIDE: HERO ===== */
+        .hero {
+            flex: 1;
+            padding: 60px 80px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-top {
+            position: absolute;
+            top: 60px;
+            left: 80px;
+        }
+
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 16px;
+            text-decoration: none;
+            font-family: var(--font-heading);
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--psu-navy);
+        }
+
+        .brand .badge {
+            background: var(--psu-navy);
+            color: var(--white);
+            font-size: 1rem;
+            font-weight: 800;
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            letter-spacing: 0.5px;
+        }
+
+        .brand .divider-line { 
+            width: 2px; 
+            height: 24px; 
+            background: var(--psu-gold); 
+            border-radius: 2px;
+        }
+
+        .hero-body {
+            max-width: 600px;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--white);
+            border: 1px solid rgba(228, 177, 52, 0.4);
+            padding: 8px 24px;
+            border-radius: var(--radius-full);
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--psu-navy);
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 32px;
+        }
+
+        .eyebrow i {
+            width: 20px;
+            height: 20px;
+            background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23e4b134" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>') no-repeat center;
+            display: inline-block;
+        }
+
+        .hero h2 {
+            font-family: var(--font-heading);
+            font-size: 4rem;
+            line-height: 1.1;
+            font-weight: 800;
+            color: var(--psu-navy);
+            letter-spacing: -1.5px;
+            margin-bottom: 24px;
+        }
+
+        .hero h2 em {
+            color: var(--psu-gold);
+            font-style: normal;
+        }
+
+        .hero .lead {
+            font-size: 1.15rem;
+            color: var(--text-muted);
+            line-height: 1.7;
+            margin-bottom: 64px;
+            max-width: 500px;
+        }
+
+        .features {
+            list-style: none;
+            display: flex;
+            gap: 40px;
+            padding-top: 40px;
+            border-top: 1px solid rgba(11, 26, 48, 0.1);
+        }
+
+        .features li {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            gap: 12px;
+            flex: 1;
+            position: relative;
+        }
+
+        .features li:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            right: -20px;
+            top: 20%;
+            height: 60%;
+            width: 1px;
+            background: rgba(11, 26, 48, 0.1);
+        }
+
+        .features .ico {
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--psu-navy);
+        }
+
+        .features strong {
+            font-family: var(--font-heading);
+            font-size: 1rem;
+            color: var(--psu-navy);
+            font-weight: 700;
+        }
+
+        .features small {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        .hero-foot {
+            position: absolute;
+            bottom: 40px;
+            left: 80px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        /* ===== RIGHT SIDE: FORM CARD ===== */
+        .form-side {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 80px 40px 20px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .register-card {
+            background: var(--white);
+            width: 100%;
+            max-width: 580px;
+            border-radius: var(--radius-lg);
+            padding: 48px 56px;
+            box-shadow: var(--shadow-card);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            position: relative;
+            margin-top: 40px;
+            margin-bottom: 40px;
+        }
+
+        .register-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .user-plus-icon {
+            width: 56px;
+            height: 56px;
+            background: var(--bg-main);
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 16px;
+            position: relative;
+        }
+        
+        .user-plus-icon svg {
+            color: var(--psu-navy);
+        }
+
+        .user-plus-icon::after {
+            content: '+';
+            position: absolute;
+            right: -2px;
+            bottom: -2px;
+            background: var(--psu-gold);
+            color: var(--white);
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+            border: 2px solid var(--white);
+        }
+
+        .register-header h1 {
+            font-family: var(--font-heading);
+            font-size: 2rem;
+            color: var(--psu-navy);
+            font-weight: 800;
+            margin-bottom: 8px;
+        }
+
+        .register-header p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        /* Stepper */
+        .stepper {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 36px;
+            padding: 0 10px;
+        }
+
+        .stepper .st {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .stepper .dot {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--white);
+            border: 2px solid var(--border-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-heading);
+            font-weight: 700;
+            font-size: 0.9rem;
+            color: var(--text-light);
+            transition: var(--transition);
+        }
+
+        .stepper .lbl {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-light);
+            transition: var(--transition);
+        }
+
+        .stepper .st.active .dot {
+            background: var(--psu-navy);
+            border-color: var(--psu-navy);
+            color: var(--white);
+            box-shadow: 0 4px 10px rgba(11, 26, 48, 0.2);
+        }
+
+        .stepper .st.active .lbl { color: var(--psu-navy); }
+
+        .stepper .st.done .dot {
+            background: var(--psu-gold);
+            border-color: var(--psu-gold);
+            color: var(--psu-navy);
+        }
+        
+        .stepper .st.done .lbl { color: var(--psu-navy); }
+
+        .stepper .line {
+            flex: 1;
+            height: 2px;
+            background: var(--border-light);
+            margin: 0 8px;
+            margin-bottom: 24px;
+            border-radius: 2px;
+            position: relative;
+        }
+
+        .stepper .line i {
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: 0;
+            background: var(--psu-gold);
+            border-radius: 2px;
+            transition: var(--transition);
+        }
+
+        .stepper .line.fill i { width: 100%; }
+
+        /* Alerts */
+        .alert-error, .alert-success {
+            padding: 16px 20px;
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .alert-error {
+            background: #fef2f2;
+            color: #b91c1c;
+            border: 1px solid #fecaca;
+        }
+
+        .alert-success {
+            background: #ecfdf5;
+            color: #047857;
+            border: 1px solid #a7f3d0;
+        }
+
+        /* Forms */
+        .form-step { display: none; animation: fadeIn 0.4s ease; }
+        .form-step.active { display: block; }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .step-title {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .step-title .ic {
+            width: 44px;
+            height: 44px;
+            background: var(--bg-main);
+            border-radius: var(--radius);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--psu-navy);
+        }
+
+        .step-title h3 {
+            font-family: var(--font-heading);
+            font-size: 1.1rem;
+            color: var(--psu-navy);
+            font-weight: 700;
+        }
+
+        .step-title p {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--psu-navy);
+        }
+
+        .form-label .opt {
+            color: var(--text-light);
+            font-weight: 400;
+            font-size: 0.8rem;
+        }
+
+        .input-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .lead-ic {
+            position: absolute;
+            left: 16px;
+            width: 18px;
+            height: 18px;
+            color: var(--text-light);
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-body);
+            font-size: 0.9rem;
+            color: var(--psu-navy);
+            background: var(--white);
+            transition: var(--transition);
+            outline: none;
+        }
+
+        .form-input::placeholder { color: var(--text-light); }
+
+        .form-input:focus {
+            border-color: var(--psu-navy);
+            box-shadow: 0 0 0 3px rgba(11, 26, 48, 0.08);
+        }
+
+        .input-wrap .form-input { padding-left: 44px; }
+        .form-input.no-ic { padding-left: 16px; }
+
+        select.form-input {
+            appearance: none;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="%230b1a30" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>');
+            background-repeat: no-repeat;
+            background-position: right 16px center;
+            padding-right: 40px;
+            cursor: pointer;
+        }
+
+        .radio-group {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .radio-pill {
+            flex: 1;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .radio-pill input {
+            position: absolute;
+            opacity: 0;
+            width: 0; height: 0;
+        }
+
+        .radio-pill span {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px;
+            background: var(--white);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            transition: var(--transition);
+        }
+
+        .radio-pill input:checked + span {
+            background: rgba(28, 61, 110, 0.04);
+            border-color: var(--psu-navy);
+            color: var(--psu-navy);
+            font-weight: 600;
+        }
+
+        .toggle-pw {
+            position: absolute;
+            right: 16px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
+
+        .toggle-pw:hover { color: var(--psu-navy); }
+
+        /* Password Strength */
+        .strength {
+            display: flex;
+            gap: 4px;
+            margin-top: 4px;
+        }
+
+        .strength i {
+            flex: 1;
+            height: 4px;
+            background: var(--border-light);
+            border-radius: 2px;
+            transition: var(--transition);
+        }
+
+        .strength-text {
+            font-size: 0.75rem;
+            color: var(--text-light);
+            font-weight: 600;
+            margin-top: 2px;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin: 20px 0 24px;
+            cursor: pointer;
+        }
+
+        .checkbox-group input {
+            width: 18px;
+            height: 18px;
+            margin-top: 2px;
+            accent-color: var(--psu-navy);
+            cursor: pointer;
+        }
+
+        .checkbox-group span {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+
+        .checkbox-group a {
+            color: var(--psu-navy);
+            font-weight: 600;
+            text-decoration: underline;
+        }
+
+        /* Actions */
+        .form-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 24px;
+            gap: 16px;
+        }
+
+        .btn-primary, .btn-secondary {
+            padding: 14px 24px;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-body);
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--psu-navy);
+            color: var(--white);
+            flex: 1;
+        }
+
+        .btn-primary:hover {
+            background: var(--psu-blue);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: var(--white);
+            color: var(--text-muted);
+            border: 1px solid var(--border-light);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-main);
+            color: var(--psu-navy);
+        }
+
+        .login-link {
+            text-align: center;
+            margin-top: 32px;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .login-link a {
+            color: var(--psu-gold);
+            font-weight: 700;
+            text-decoration: none;
+            margin-left: 4px;
+        }
+
+        .login-link a:hover { text-decoration: underline; }
+
+        /* Responsive */
+        @media (max-width: 1100px) {
+            .hero { padding: 60px 40px; }
+            .hero h2 { font-size: 3rem; }
+            .form-side { padding: 40px; }
+            .register-card { padding: 36px 40px; }
+        }
+
+        @media (max-width: 900px) {
+            .page { flex-direction: column; }
+            .hero { padding: 100px 24px 40px; align-items: center; text-align: center; }
+            .hero-top { top: 30px; left: 50%; transform: translateX(-50%); width: 100%; display: flex; justify-content: center; }
+            .hero .lead { margin: 0 auto 40px; }
+            .features { display: none; }
+            .hero-foot { position: relative; bottom: 0; left: 0; margin-top: 40px; }
+            .form-side { padding: 0 24px 40px; }
+            .register-card { margin-top: 0; }
+        }
+
+        @media (max-width: 600px) {
+            .form-row { grid-template-columns: 1fr; }
+            .register-card { padding: 24px; }
+            .stepper .lbl { display: none; }
+            .hero h2 { font-size: 2.5rem; }
+        }
+    </style>
 </head>
 <body>
 
 <div class="page">
-
+    <!-- LEFT HERO SECTION -->
     <aside class="hero">
-        <div class="orb o1"></div>
-        <div class="orb o2"></div>
-
         <div class="hero-top">
-            <a href="website.php" class="brand"><span class="badge">PSU</span> PSU <span class="gold">Internalization</span></a>
+            <a href="website.php" class="brand">
+                <span class="badge">PSU</span> 
+                <div class="divider-line"></div>
+                PSU Internationalization
+            </a>
         </div>
 
         <div class="hero-body">
-            <div class="eyebrow"><i></i> Applications are open</div>
+            <div class="eyebrow"><i></i> Student & Faculty Mobility Portal</div>
             <h2>Your journey to the <em>world</em> starts here.</h2>
             <p class="lead">Create your account to explore international exchange, study abroad, and global learning programs offered by Pangasinan State University.</p>
 
             <ul class="features">
                 <li>
-                    <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg></div>
-                    <div><strong>Browse global programs</strong><small>Find opportunities abroad that fit you</small></div>
+                    <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
+                    <div><strong>Explore<br>Programs</strong></div>
                 </li>
                 <li>
-                    <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg></div>
-                    <div><strong>Apply in one place</strong><small>Submit and manage your applications online</small></div>
+                    <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+                    <div><strong>Build<br>Global Connections</strong></div>
                 </li>
                 <li>
-                    <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></div>
-                    <div><strong>Track your status</strong><small>Stay updated at every step of the process</small></div>
+                    <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg></div>
+                    <div><strong>Broaden<br>Your Horizons</strong></div>
                 </li>
             </ul>
         </div>
 
-        <div class="hero-foot">&copy; <?= date('Y') ?> Pangasinan State University &middot; Internalization Office</div>
+        <div class="hero-foot">&copy; <?= date('Y') ?> Pangasinan State University &middot; Internationalization Office</div>
     </aside>
 
+    <!-- RIGHT FORM CARD -->
     <main class="form-side">
         <div class="register-card">
-
             <div class="register-header">
+                <div class="user-plus-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+                </div>
                 <h1>Create Account</h1>
-                <p>Join PSU Internalization to apply for global programs</p>
+                <p>Join PSU Internationalization to apply for global programs</p>
             </div>
 
             <!-- Stepper -->
@@ -235,9 +981,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <?php if (!empty($reg_errors)): ?>
                 <div class="alert-error">
-                    <?php foreach ($reg_errors as $error): ?>
-                        &bull; <?= e($error) ?><br>
-                    <?php endforeach; ?>
+                    <div>
+                        <?php foreach ($reg_errors as $error): ?>
+                            &bull; <?= e($error) ?><br>
+                        <?php endforeach; ?>
+                    </div>
                 </div>
             <?php endif; ?>
 
@@ -252,65 +1000,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 <!-- STEP 1: PERSONAL INFO -->
                 <div class="form-step <?= ($reg_step === 1) ? 'active' : '' ?>" id="step-1">
-                    <div class="step-title">
-                        <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
-                        <div><h3>Tell us about yourself</h3><p>Your personal details</p></div>
-                    </div>
-
                     <div class="form-row">
                         <div class="form-group">
                             <label class="form-label">First Name *</label>
                             <div class="input-wrap">
                                 <svg class="lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                                <input class="form-input" type="text" name="first_name" placeholder="Juan" required value="<?= e($reg_first_name) ?>">
+                                <input class="form-input" type="text" name="first_name" placeholder="Enter your first name" required value="<?= e($reg_first_name) ?>">
                             </div>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Last Name *</label>
                             <div class="input-wrap">
                                 <svg class="lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                                <input class="form-input" type="text" name="last_name" placeholder="Dela Cruz" required value="<?= e($reg_last_name) ?>">
+                                <input class="form-input" type="text" name="last_name" placeholder="Enter your last name" required value="<?= e($reg_last_name) ?>">
                             </div>
                         </div>
                     </div>
 
                     <div class="form-row">
                         <div class="form-group">
-                            <label class="form-label">Middle Name <span class="opt">(Optional)</span></label>
+                            <label class="form-label">Email Address *</label>
                             <div class="input-wrap">
-                                <svg class="lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                                <input class="form-input" type="text" name="middle_name" placeholder="Santos" value="<?= e($reg_middle_name) ?>">
+                                <svg class="lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>
+                                <input class="form-input" type="email" name="email" placeholder="Enter your email address" required value="<?= e($reg_email) ?>">
                             </div>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Suffix <span class="opt">(Optional)</span></label>
-                            <div class="input-wrap">
-                                <svg class="lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/></svg>
-                                <input class="form-input" type="text" name="suffix" placeholder="Jr., III" value="<?= e($reg_suffix) ?>">
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="form-label">Sex *</label>
-                        <div class="radio-group">
-                            <!-- FIX: Capitalized values to match DB -->
-                            <label class="radio-pill"><input type="radio" name="sex" value="Male" <?= $reg_sex === 'Male' ? 'checked' : '' ?> required><span>Male</span></label>
-                            <label class="radio-pill"><input type="radio" name="sex" value="Female" <?= $reg_sex === 'Female' ? 'checked' : '' ?>><span>Female</span></label>
-                            <label class="radio-pill"><input type="radio" name="sex" value="Prefer not to say" <?= $reg_sex === 'Prefer not to say' ? 'checked' : '' ?>><span>Prefer not to say</span></label>
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Date of Birth *</label>
-                            <input class="form-input no-ic" type="date" name="date_of_birth" required value="<?= e($reg_dob) ?>" max="<?= date('Y-m-d') ?>">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Student ID *</label>
+                            <label class="form-label">Student ID <span class="opt">(Optional)</span></label>
                             <div class="input-wrap">
                                 <svg class="lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M15 9h3M15 13h3M6 17c.5-2 2-3 3-3s2.5 1 3 3"/></svg>
-                                <input class="form-input" type="text" name="student_id_number" placeholder="21-00123" required value="<?= e($reg_student_id) ?>">
+                                <input class="form-input" type="text" name="id_number" placeholder="Enter your student ID" value="<?= e($reg_id_number) ?>">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Sex *</label>
+                            <div class="input-wrap">
+                                <svg class="lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="10" r="4"/><path d="M12 14v7M8 18h8M19 5l-3 3M17 3l2 2"/></svg>
+                                <select class="form-input" name="sex" required>
+                                    <option value="">Select sex</option>
+                                    <option value="Male" <?= $reg_sex === 'Male' ? 'selected' : '' ?>>Male</option>
+                                    <option value="Female" <?= $reg_sex === 'Female' ? 'selected' : '' ?>>Female</option>
+                                    <option value="Prefer not to say" <?= $reg_sex === 'Prefer not to say' ? 'selected' : '' ?>>Prefer not to say</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Date of Birth *</label>
+                            <div class="input-wrap">
+                                <svg class="lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                                <input class="form-input" type="date" name="date_of_birth" required value="<?= e($reg_dob) ?>" max="<?= date('Y-m-d') ?>">
                             </div>
                         </div>
                     </div>
@@ -322,11 +1063,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 <!-- STEP 2: ACCOUNT INFO -->
                 <div class="form-step <?= ($reg_step === 2) ? 'active' : '' ?>" id="step-2">
-                    <div class="step-title">
-                        <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg></div>
-                        <div><h3>Your account email</h3><p>We'll use this to sign you in and send updates</p></div>
-                    </div>
-
                     <div class="form-group">
                         <label class="form-label">PSU Email Address *</label>
                         <div class="input-wrap">
@@ -343,9 +1079,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 <!-- STEP 3: ACADEMIC DETAILS -->
                 <div class="form-step <?= ($reg_step === 3) ? 'active' : '' ?>" id="step-3">
-                    <div class="step-title">
-                        <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10L12 4 2 10l10 6 10-6z"/><path d="M6 12.5V17c0 1 3 3 6 3s6-2 6-3v-4.5"/></svg></div>
-                        <div><h3>Academic details</h3><p>Where and what you study</p></div>
+                    <div class="form-group">
+                        <label class="form-label">I am a... *</label>
+                        <div class="radio-group">
+                            <label class="radio-pill"><input type="radio" name="account_type" value="Student" <?= $reg_account_type === 'Student' ? 'checked' : '' ?> onclick="toggleAccountType('Student')" required><span>Student</span></label>
+                            <label class="radio-pill"><input type="radio" name="account_type" value="Faculty" <?= $reg_account_type === 'Faculty' ? 'checked' : '' ?> onclick="toggleAccountType('Faculty')"><span>Faculty</span></label>
+                        </div>
                     </div>
 
                     <div class="form-group">
@@ -359,43 +1098,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         </div>
                     </div>
 
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Department *</label>
-                            <select class="form-input no-ic" name="department" required>
-                                <option value="">Select</option>
-                                <option value="College of Engineering" <?= $reg_department === 'College of Engineering' ? 'selected' : '' ?>>Engineering</option>
-                                <option value="College of Information Technology" <?= $reg_department === 'College of Information Technology' ? 'selected' : '' ?>>IT</option>
-                                <option value="College of Business" <?= $reg_department === 'College of Business' ? 'selected' : '' ?>>Business</option>
-                                <option value="College of Education" <?= $reg_department === 'College of Education' ? 'selected' : '' ?>>Education</option>
-                                <option value="College of Arts and Sciences" <?= $reg_department === 'College of Arts and Sciences' ? 'selected' : '' ?>>Arts & Sciences</option>
-                            </select>
+                    <div class="form-group">
+                        <label class="form-label">Department *</label>
+                        <select class="form-input no-ic" name="department" required>
+                            <option value="">Select</option>
+                            <?php foreach ($departmentOptions as $department => $label): ?>
+                                <option value="<?= e($department) ?>" <?= $reg_department === $department ? 'selected' : '' ?>><?= e($label) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+
+                    <!-- STUDENT FIELDS -->
+                    <div id="student-fields" style="display: <?= $reg_account_type === 'Student' ? 'block' : 'none' ?>;">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Program *</label>
+                                <select class="form-input no-ic" name="program" id="student_program">
+                                    <option value="">Select</option>
+                                    <option value="BS Information Technology" <?= $reg_program === 'BS Information Technology' ? 'selected' : '' ?>>BS IT</option>
+                                    <option value="BS Computer Science" <?= $reg_program === 'BS Computer Science' ? 'selected' : '' ?>>BS CS</option>
+                                    <option value="BS Civil Engineering" <?= $reg_program === 'BS Civil Engineering' ? 'selected' : '' ?>>BS CE</option>
+                                    <option value="BS Accountancy" <?= $reg_program === 'BS Accountancy' ? 'selected' : '' ?>>BS Accountancy</option>
+                                    <option value="Bachelor of Elementary Education" <?= $reg_program === 'Bachelor of Elementary Education' ? 'selected' : '' ?>>BEEd</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Year Level *</label>
+                                <select class="form-input no-ic" name="year_level" id="student_year">
+                                    <option value="">Select</option>
+                                    <option value="1st Year" <?= $reg_year_level === '1st Year' ? 'selected' : '' ?>>1st Year</option>
+                                    <option value="2nd Year" <?= $reg_year_level === '2nd Year' ? 'selected' : '' ?>>2nd Year</option>
+                                    <option value="3rd Year" <?= $reg_year_level === '3rd Year' ? 'selected' : '' ?>>3rd Year</option>
+                                    <option value="4th Year" <?= $reg_year_level === '4th Year' ? 'selected' : '' ?>>4th Year</option>
+                                    <option value="5th Year" <?= $reg_year_level === '5th Year' ? 'selected' : '' ?>>5th Year</option>
+                                </select>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label class="form-label">Program *</label>
-                            <select class="form-input no-ic" name="program" required>
-                                <option value="">Select</option>
-                                <option value="BS Information Technology" <?= $reg_program === 'BS Information Technology' ? 'selected' : '' ?>>BS IT</option>
-                                <option value="BS Computer Science" <?= $reg_program === 'BS Computer Science' ? 'selected' : '' ?>>BS CS</option>
-                                <option value="BS Civil Engineering" <?= $reg_program === 'BS Civil Engineering' ? 'selected' : '' ?>>BS CE</option>
-                                <option value="BS Accountancy" <?= $reg_program === 'BS Accountancy' ? 'selected' : '' ?>>BS Accountancy</option>
-                                <option value="Bachelor of Elementary Education" <?= $reg_program === 'Bachelor of Elementary Education' ? 'selected' : '' ?>>BEEd</option>
-                            </select>
+                    </div>
+
+                    <!-- FACULTY FIELDS -->
+                    <div id="faculty-fields" style="display: <?= $reg_account_type === 'Faculty' ? 'block' : 'none' ?>;">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Faculty Rank *</label>
+                                <select class="form-input no-ic" name="faculty_rank" id="faculty_rank">
+                                    <option value="">Select</option>
+                                    <option value="Instructor" <?= $reg_faculty_rank === 'Instructor' ? 'selected' : '' ?>>Instructor</option>
+                                    <option value="Assistant Professor" <?= $reg_faculty_rank === 'Assistant Professor' ? 'selected' : '' ?>>Assistant Professor</option>
+                                    <option value="Associate Professor" <?= $reg_faculty_rank === 'Associate Professor' ? 'selected' : '' ?>>Associate Professor</option>
+                                    <option value="Professor" <?= $reg_faculty_rank === 'Professor' ? 'selected' : '' ?>>Professor</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
 
                     <div class="form-row">
-                        <div class="form-group">
-                            <label class="form-label">Year Level *</label>
-                            <select class="form-input no-ic" name="year_level" required>
-                                <option value="">Select</option>
-                                <option value="1st Year" <?= $reg_year_level === '1st Year' ? 'selected' : '' ?>>1st Year</option>
-                                <option value="2nd Year" <?= $reg_year_level === '2nd Year' ? 'selected' : '' ?>>2nd Year</option>
-                                <option value="3rd Year" <?= $reg_year_level === '3rd Year' ? 'selected' : '' ?>>3rd Year</option>
-                                <option value="4th Year" <?= $reg_year_level === '4th Year' ? 'selected' : '' ?>>4th Year</option>
-                                <option value="5th Year" <?= $reg_year_level === '5th Year' ? 'selected' : '' ?>>5th Year</option>
-                            </select>
-                        </div>
                         <div class="form-group">
                             <label class="form-label">Term <span class="opt">(Optional)</span></label>
                             <input class="form-input no-ic" type="text" name="term" placeholder="1st Sem 2024" value="<?= e($reg_term) ?>">
@@ -410,11 +1167,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 <!-- STEP 4: SECURITY -->
                 <div class="form-step <?= ($reg_step === 4) ? 'active' : '' ?>" id="step-4">
-                    <div class="step-title">
-                        <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg></div>
-                        <div><h3>Secure your account</h3><p>Choose a strong password</p></div>
-                    </div>
-
                     <div class="form-group">
                         <label class="form-label">Password *</label>
                         <div class="input-wrap">
@@ -432,7 +1184,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <label class="form-label">Confirm Password *</label>
                         <div class="input-wrap">
                             <svg class="lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                            <input class="form-input" type="password" name="confirm_password" id="pw2" placeholder="Confirm password" required autocomplete="new-password">
+                            <input class="form-input" type="password" name="confirm_password" id="pw2" placeholder="Confirm password" required autocomplete="new-password" style="padding-right:46px;">
+                             <button type="button" class="toggle-pw" onclick="togglePw()" aria-label="Show or hide password">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
                         </div>
                     </div>
 
@@ -443,14 +1198,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     <div class="form-actions">
                         <button type="button" class="btn-secondary" onclick="nextStep(3)">&larr; Back</button>
-                        <button type="submit" class="btn-primary" onclick="return validateFinal()">Create Account</button>
+                        <button type="submit" class="btn-primary" onclick="return validateFinal()">Register Account &rarr;</button>
                     </div>
                 </div>
 
             </form>
 
             <div class="login-link">
-                Already have an account? <a href="user_login.php">Sign In</a>
+                Already have an account? <a href="user_login.php">Log in</a>
             </div>
 
         </div>
@@ -515,6 +1270,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     });
 
     document.addEventListener('DOMContentLoaded', () => updateStepper(<?= (int)$reg_step ?>));
+    
+    function toggleAccountType(type) {
+        const studentFields = document.getElementById('student-fields');
+        const facultyFields = document.getElementById('faculty-fields');
+        
+        const progSelect = document.getElementById('student_program');
+        const yearSelect = document.getElementById('student_year');
+        const rankSelect = document.getElementById('faculty_rank');
+
+        if (type === 'Student') {
+            studentFields.style.display = 'block';
+            facultyFields.style.display = 'none';
+            
+            progSelect.required = true;
+            yearSelect.required = true;
+            rankSelect.required = false;
+        } else {
+            studentFields.style.display = 'none';
+            facultyFields.style.display = 'block';
+            
+            progSelect.required = false;
+            yearSelect.required = false;
+            rankSelect.required = true;
+        }
+    }
 </script>
 
 </body>

@@ -1,15 +1,17 @@
 <?php
+declare(strict_types=1);
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
 /**
- * Get clean role
+ * Get clean, normalized role (lowercase, underscores → spaces)
  */
 function getRole(): string
 {
-    return strtolower(trim($_SESSION['user_role'] ?? ''));
+    $role = strtolower(trim($_SESSION['user_role'] ?? ''));
+    return str_replace('_', ' ', $role);
 }
 
 /**
@@ -24,15 +26,16 @@ function requireLogin(): void
 }
 
 /**
- * Require specific roles
+ * Require one of the given roles
  */
 function requireRole(array $roles, string $redirect = '/public/login.php'): void
 {
     requireLogin();
 
     $role = getRole();
-
-    $roles = array_map('strtolower', $roles);
+    $roles = array_map(static function ($r) {
+        return str_replace('_', ' ', strtolower(trim($r)));
+    }, $roles);
 
     if (!in_array($role, $roles, true)) {
         header("Location: $redirect");
@@ -41,17 +44,40 @@ function requireRole(array $roles, string $redirect = '/public/login.php'): void
 }
 
 /**
- * Shortcut: Admin only
+ * All staff roles (admin, coordinator, OVPLIA, approvers)
  */
-function requireAdmin(): void
+function requireStaff(): void
 {
-    requireRole(['admin', 'ad', 'super admin', 'sa'], '/user/dashboard.php');
+    requireRole([
+        'admin', 'ad',
+        'super admin', 'sa',
+        'campus coordinator',
+        'ovplia staff',
+        'approving official',
+        'bor secretary',
+    ], '/public/login.php');
 }
 
 /**
- * Shortcut: Applicant only
+ * Strict admin only
+ */
+function requireAdminOnly(): void
+{
+    requireRole(['admin','ad','super admin','sa'], '/public/login.php');
+}
+
+/**
+ * Applicant only
  */
 function requireApplicant(): void
 {
-    requireRole(['applicant', 'ap'], '/admin/dashboard.php');
+    requireRole(['applicant','ap'], '/admin/dashboard.php');
+}
+
+/**
+ * Backward-compat alias — behaves like the old requireAdmin()
+ */
+function requireAdmin(): void
+{
+    requireStaff();
 }

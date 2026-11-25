@@ -26,16 +26,31 @@ function respond(int $status, string $message, ?array $data = null): void
 }
 
 /* =========================
-   ROLE HELPERS
+   ROLE HELPERS (Based on DFD)
 ========================= */
 function isSuperAdmin(string $role): bool
 {
-    return $role === 'super admin';
+    return $role === 'super_admin' || $role === 'super admin';
 }
 
 function isAdmin(string $role): bool
 {
     return $role === 'admin';
+}
+
+function isCoordinator(string $role): bool
+{
+    return in_array($role, ['campus_coordinator', 'campus coordinator', 'ovplia_staff', 'ovplia staff'], true);
+}
+
+function isApprover(string $role): bool
+{
+    return in_array($role, ['approving_official', 'approving official', 'bor_secretary', 'bor secretary'], true);
+}
+
+function isApplicant(string $role): bool
+{
+    return in_array($role, ['applicant', 'student', 'faculty'], true);
 }
 
 /* =========================
@@ -48,9 +63,19 @@ if (!isset($_SESSION['user_id'])) {
 $currentUserId = (int)$_SESSION['user_id'];
 $currentRole   = strtolower(trim($_SESSION['user_role'] ?? ''));
 
-/* Only admins + super admins can access this endpoint */
-if (!in_array($currentRole, ['admin', 'super admin'], true)) {
-    respond(403, 'You do not have permission to perform this action.');
+/* Ensure the user has a valid role */
+$validRoles = [
+    'super_admin', 'super admin', 
+    'admin', 
+    'campus_coordinator', 'campus coordinator', 
+    'ovplia_staff', 'ovplia staff',
+    'approving_official', 'approving official',
+    'bor_secretary', 'bor secretary',
+    'applicant', 'student', 'faculty'
+];
+
+if (!in_array($currentRole, $validRoles, true)) {
+    respond(403, 'You do not have permission to access this system.');
 }
 
 /* =========================
@@ -62,7 +87,7 @@ function validate_fields(array $f): array
 
     $studentId = (int)($f['student_id'] ?? 0);
     if ($studentId <= 0) {
-        $errors[] = 'Please select a student.';
+        $errors[] = 'Please select a student/applicant.';
     }
 
     $week = trim((string)($f['week_number'] ?? ''));
@@ -92,10 +117,9 @@ function validate_fields(array $f): array
         $errors[] = 'Status must be one of: ongoing, completed, delayed.';
     }
 
-    /* Optional field validation */
     $feedback = trim((string)($f['supervisor_feedback'] ?? ''));
     if (strlen($feedback) > 2000) {
-        $errors[] = 'Supervisor feedback must not exceed 2000 characters.';
+        $errors[] = 'Feedback must not exceed 2000 characters.';
     }
 
     return $errors;
@@ -109,8 +133,28 @@ $action = $_POST['action'] ?? ($_GET['action'] ?? '');
 try {
     switch ($action) {
 
-        /* ─────────────── CREATE (Admin + Super Admin) ─────────────── */
+        /* ─────────────── CREATE (Admin, Super Admin, Coordinator, Applicant) ─────────────── */
         case 'create':
+            // Applicants can create, but only for themselves.
+            // Admins/Coordinators can create for anyone.
+            if (isApprover($currentRole)) {
+                respond(403, 'Approving Officials cannot create records.');
+            }
+
+            if (isApplicant($currentRole)) {
+                // Force the student_id to be their own ID.
+                // Assuming 'students' table has a 'user_id' column linking to the logged-in user.
+                $selfCheck = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
+                $selfCheck->execute([$currentUserId]);
+                $selfStudentId = (int)$selfCheck->fetchColumn();
+
+                if ($selfStudentId <= 0) {
+                    respond(400, 'Applicant profile not found. Contact Admin.');
+                }
+
+                $_POST['student_id'] = $selfStudentId;
+            }
+
             $errors = validate_fields($_POST);
             if ($errors) {
                 respond(422, 'Validation failed.', ['errors' => $errors]);
@@ -146,23 +190,42 @@ try {
             respond(200, 'Activity record created successfully.', ['id' => (int)$pdo->lastInsertId()]);
             break;
 
-        /* ─────────────── UPDATE (Admin + Super Admin) ─────────────── */
+        /* ─────────────── UPDATE (Admin, Super Admin, Coordinator, Applicant) ─────────────── */
         case 'update':
+            if (isApprover($currentRole)) {
+                respond(403, 'Approving Officials cannot update records.');
+            }
+
             $id = filter_var($_POST['id'] ?? 0, FILTER_VALIDATE_INT);
             if ($id === false || $id < 1) {
                 respond(400, 'Invalid record ID.');
             }
 
-            // Ensure record exists + grab current student & status
-            $exists = $pdo->prepare("
-                SELECT id, student_id, status
-                FROM activity_monitoring
-                WHERE id = ?
-            ");
+            // Ensure record exists + grab current data
+            $exists = $pdo->prepare("SELECT id, student_id, status FROM activity_monitoring WHERE id = ?");
             $exists->execute([$id]);
             $existing = $exists->fetch(PDO::FETCH_ASSOC);
             if (!$existing) {
                 respond(404, 'Record not found.');
+            }
+
+            // Applicants can only update their OWN records
+            if (isApplicant($currentRole)) {
+                $selfCheck = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
+                $selfCheck->execute([$currentUserId]);
+                $selfStudentId = (int)$selfCheck->fetchColumn();
+
+                if ((int)$existing['student_id'] !== $selfStudentId) {
+                    respond(403, 'You can only update your own records.');
+                }
+
+                // Applicants cannot change status to 'completed' or 'delayed' (coordinator handles this)
+                if (isset($_POST['status']) && in_array($_POST['status'], ['completed', 'delayed'], true)) {
+                    respond(403, 'Only coordinators/admins can finalize a status.');
+                }
+                
+                // Force student_id to remain the same
+                $_POST['student_id'] = $selfStudentId;
             }
 
             $errors = validate_fields($_POST);
@@ -174,16 +237,16 @@ try {
             $newStatus    = $_POST['status'];
 
             /* ---- SUPER ADMIN EXCLUSIVE RULES ---- */
-            if (!isSuperAdmin($currentRole)) {
+            if (!isSuperAdmin($currentRole) && !isAdmin($currentRole)) {
 
-                // Admin cannot reassign a record to a different student
+                // Coordinators cannot reassign a record to a different student
                 if ($newStudentId !== (int)$existing['student_id']) {
-                    respond(403, 'Admins cannot reassign a record to a different student.');
+                    respond(403, 'Only Admins can reassign a record to a different student.');
                 }
 
-                // Admin cannot reopen a completed report
+                // Coordinators cannot reopen a completed report
                 if ($existing['status'] === 'completed' && $newStatus !== 'completed') {
-                    respond(403, 'Only a Super Admin can reopen a completed report.');
+                    respond(403, 'Only an Admin/Super Admin can reopen a completed report.');
                 }
             }
 
@@ -227,7 +290,7 @@ try {
             respond(200, 'Activity record deleted successfully.', ['id' => $id]);
             break;
 
-        /* ─────────────── FETCH ONE (Admin + Super Admin) ─────────────── */
+        /* ─────────────── FETCH ONE (All Roles Can Read) ─────────────── */
         case 'fetch':
             $id = filter_var($_GET['id'] ?? 0, FILTER_VALIDATE_INT);
             if ($id === false || $id < 1) {
@@ -246,6 +309,17 @@ try {
 
             if (!$row) {
                 respond(404, 'Record not found.');
+            }
+
+            // Applicants can only fetch their own records
+            if (isApplicant($currentRole)) {
+                $selfCheck = $pdo->prepare("SELECT id FROM students WHERE user_id = ?");
+                $selfCheck->execute([$currentUserId]);
+                $selfStudentId = (int)$selfCheck->fetchColumn();
+
+                if ((int)$row['student_id'] !== $selfStudentId) {
+                    respond(403, 'You can only view your own records.');
+                }
             }
 
             respond(200, 'OK', $row);

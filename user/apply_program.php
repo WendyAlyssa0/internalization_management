@@ -12,7 +12,7 @@ if (!isset($pdo, $userId) || !($pdo instanceof PDO)) {
 /* =========================================================
    CONFIGURE THESE IF YOUR SCHEMA DIFFERS
    ========================================================= */
-$APP_USER_COL = 'user_id';          // or 'applicant_id'
+$APP_USER_COL = 'applicant_id';
 
 if (session_status() === PHP_SESSION_NONE) session_start();
 if (empty($_SESSION['csrf_token'])) {
@@ -27,6 +27,11 @@ $programId = (int)($_POST['program_id'] ?? $_GET['program_id'] ?? 0);
 $action    = (string)($_POST['action'] ?? $_GET['action'] ?? 'start');
 
 $flash = null;
+$departmentStmt = $pdo->prepare('SELECT department, account_type FROM users WHERE id = ?');
+$departmentStmt->execute([$userId]);
+$applicant = $departmentStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+$applicantDepartment = (string)($applicant['department'] ?? '');
+$applicantAccountType = (string)($applicant['account_type'] ?? '');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_ok()) {
@@ -34,8 +39,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($programId <= 0) {
         $flash = ['type' => 'error', 'msg' => 'Invalid program selected.'];
     } else {
-        $stmt = $pdo->prepare("SELECT id, program_name, status, end_date FROM programs WHERE id = ? LIMIT 1");
-        $stmt->execute([$programId]);
+        $stmt = $pdo->prepare("
+            SELECT p.id, p.program_name, p.status, p.end_date
+            FROM programs p
+            WHERE p.id = ?
+              AND p.eligible_department IN ('All Departments', ?)
+              AND p.eligible_account_type = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$programId, $applicantDepartment, $applicantAccountType]);
         $program = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$program) {
@@ -91,12 +103,15 @@ $stmt = $pdo->prepare("
            country.country_name,
            EXISTS (SELECT 1 FROM applications a WHERE a.{$APP_USER_COL} = ? AND a.program_id = p.id) AS already_applied
     FROM programs p
+    INNER JOIN users applicant ON applicant.id = ?
     LEFT JOIN countries country ON country.id = p.country_id
     WHERE p.status IN ('Active', 'Upcoming')
       AND (p.end_date IS NULL OR p.end_date >= CURDATE())
+      AND p.eligible_account_type = applicant.account_type
+      AND (p.eligible_department = 'All Departments' OR p.eligible_department = applicant.department)
     ORDER BY p.start_date, p.program_name
 ");
-$stmt->execute([$userId]);
+$stmt->execute([$userId, $userId]);
 $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 if (!empty($_SESSION['apply_flash'])) {

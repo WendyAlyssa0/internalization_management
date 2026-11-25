@@ -10,11 +10,15 @@ if (!isset($_SESSION['user_id'])) {
     exit();
 }
 
+/* CSRF TOKEN */
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrfToken = $_SESSION['csrf_token'];
+
 $pdo = db();
 
-/* =========================
-   FETCH NOTIFICATIONS
-========================= */
+/* FETCH NOTIFICATIONS */
 $stmt = $pdo->prepare("
     SELECT id, type, title, message, is_read, created_at
     FROM notifications
@@ -52,7 +56,6 @@ $typeMap = [
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 
 <div class="content">
-
 <div class="notification-card">
 
     <div class="notification-header">
@@ -62,13 +65,9 @@ $typeMap = [
         </div>
 
         <?php if ($unreadCount > 0): ?>
-            <span class="notification-badge" id="badge">
-                <?= $unreadCount ?> unread
-            </span>
+            <span class="notification-badge" id="badge"><?= $unreadCount ?> unread</span>
         <?php else: ?>
-            <span class="notification-badge" id="badge" style="display:none;">
-                0 unread
-            </span>
+            <span class="notification-badge" id="badge" style="display:none;">0 unread</span>
         <?php endif; ?>
     </div>
 
@@ -82,12 +81,11 @@ $typeMap = [
     </div>
 
     <div class="notification-list">
-
     <?php if (!empty($notifications)): ?>
         <?php foreach ($notifications as $n):
-            $map     = $typeMap[$n['type']] ?? $typeMap['default'];
-            $icon    = $map[0];
-            $label   = $map[1];
+            $map      = $typeMap[$n['type']] ?? $typeMap['default'];
+            $icon     = $map[0];
+            $label    = $map[1];
             $isUnread = !$n['is_read'];
         ?>
         <div class="notification-item <?= $isUnread ? 'unread' : '' ?>"
@@ -116,14 +114,11 @@ $typeMap = [
         <?php endforeach; ?>
     <?php else: ?>
         <div class="notification-empty">
-            <div class="notification-empty-icon">
-                <i class="ti ti-bell-off"></i>
-            </div>
+            <div class="notification-empty-icon"><i class="ti ti-bell-off"></i></div>
             <h3>No notifications yet</h3>
             <p>You're all caught up. New alerts will appear here.</p>
         </div>
     <?php endif; ?>
-
     </div>
 
     <div class="notification-footer">
@@ -132,20 +127,24 @@ $typeMap = [
             <i class="ti ti-checks"></i> Mark all as read
         </button>
     </div>
-
 </div>
-
 </div>
 
 <script>
+window.NOTIF_CSRF = <?= json_encode($csrfToken) ?>;
+
 /* ── Mark single as read ── */
 function markRead(el) {
     if (el.dataset.read === 'read') return;
 
-    fetch('../admin/markread.php', {
+    // Ensure path points to where markread.php is located (same directory assumed here)
+    fetch('markread.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: el.dataset.id })
+        body: JSON.stringify({ 
+            id: el.dataset.id,
+            csrf_token: window.NOTIF_CSRF 
+        })
     })
     .then(async res => {
         const text = await res.text();
@@ -159,8 +158,7 @@ function markRead(el) {
             const dot = el.querySelector('.unread-dot');
             if (dot) dot.style.display = 'none';
             const icon = el.querySelector('.notification-icon');
-            if (icon) icon.style.background = '';
-            if (icon) icon.style.color = '';
+            if (icon) { icon.style.background = ''; icon.style.color = ''; }
             updateBadge();
         } else {
             showToast('error', res.message || 'Could not mark notification.');
@@ -171,7 +169,13 @@ function markRead(el) {
 
 /* ── Mark all as read ── */
 function markAllRead() {
-    fetch('../admin/markallread.php', { method: 'POST' })
+    const formData = new FormData();
+    formData.append('csrf_token', window.NOTIF_CSRF);
+
+    fetch('markallread.php', { 
+        method: 'POST', 
+        body: formData 
+    })
     .then(async res => {
         const text = await res.text();
         try { return JSON.parse(text); }
@@ -185,8 +189,7 @@ function markAllRead() {
                 const dot = el.querySelector('.unread-dot');
                 if (dot) dot.style.display = 'none';
                 const icon = el.querySelector('.notification-icon');
-                if (icon) icon.style.background = '';
-                if (icon) icon.style.color = '';
+                if (icon) { icon.style.background = ''; icon.style.color = ''; }
             });
             updateBadge();
             showToast('success', 'All notifications marked as read.');
@@ -201,7 +204,6 @@ function markAllRead() {
 function updateBadge() {
     const unread = document.querySelectorAll('.notification-item.unread').length;
     const badge = document.getElementById('badge');
-
     if (!badge) return;
 
     if (unread > 0) {
@@ -220,8 +222,7 @@ function filter(type, btn) {
         el.style.display = (matchType && matchRead) ? '' : 'none';
     });
 
-    document.querySelectorAll('.notification-filters button')
-        .forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.notification-filters button').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
 }
 

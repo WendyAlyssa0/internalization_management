@@ -14,16 +14,15 @@ use PHPMailer\PHPMailer\Exception as PHPMailerException;
 /* =========================
    MAIL CONFIGURATION
    
-   ⚠️ DO NOT commit real credentials to GitHub.
-   Use environment variables OR a .env file loaded before this.
-   Fallbacks below are for local development only.
+   Configure PSU_SMTP_USERNAME, PSU_SMTP_PASSWORD, and APP_BASE_URL
+   in the web server environment. Credentials are not stored in source.
 ========================= */
-if (!defined('MAIL_HOST'))      define('MAIL_HOST',     'smtp.gmail.com');
-if (!defined('MAIL_PORT'))      define('MAIL_PORT',     587);
-if (!defined('MAIL_USERNAME'))  define('MAIL_USERNAME', 'latorrewendy5@gmail.com');
-if (!defined('MAIL_PASSWORD'))  define('MAIL_PASSWORD', 'zxcyjvqajxwciqnd');
-if (!defined('MAIL_FROM_ADDR')) define('MAIL_FROM_ADDR','latorrewendy5@gmail.com');
-if (!defined('MAIL_FROM_NAME')) define('MAIL_FROM_NAME','PSU Internalization');
+if (!defined('MAIL_HOST'))      define('MAIL_HOST',     getenv('PSU_SMTP_HOST') ?: 'smtp.gmail.com');
+if (!defined('MAIL_PORT'))      define('MAIL_PORT',     (int)(getenv('PSU_SMTP_PORT') ?: 587));
+if (!defined('MAIL_USERNAME'))  define('MAIL_USERNAME', getenv('PSU_SMTP_USERNAME') ?: '');
+if (!defined('MAIL_PASSWORD'))  define('MAIL_PASSWORD', getenv('PSU_SMTP_PASSWORD') ?: '');
+if (!defined('MAIL_FROM_ADDR')) define('MAIL_FROM_ADDR', getenv('PSU_SMTP_FROM') ?: MAIL_USERNAME);
+if (!defined('MAIL_FROM_NAME')) define('MAIL_FROM_NAME','PSU Internationalization');
 
 if (!defined('MAIL_DEBUG'))     define('MAIL_DEBUG',    false);
 
@@ -180,6 +179,11 @@ function sendPasswordResetOTP(string $toEmail, string $otp): bool {
         error_log('[sendPasswordResetOTP] SMTP credentials are not configured.');
         return false;
     }
+    $baseUrl = getenv('APP_BASE_URL');
+    if (!is_string($baseUrl) || trim($baseUrl) === '') {
+        error_log('[sendPasswordResetOTP] APP_BASE_URL is not configured.');
+        return false;
+    }
 
     $mail = new PHPMailer(true);
 
@@ -204,30 +208,30 @@ function sendPasswordResetOTP(string $toEmail, string $otp): bool {
         $mail->addAddress($toEmail);
 
         $mail->isHTML(true);
-        $mail->Subject = 'Your PSU Internalization password reset code';
+        $mail->Subject = 'Your PSU Internationalization password reset code';
 
         $safeOtp = htmlspecialchars($otp, ENT_QUOTES, 'UTF-8');
         $ttl     = (int)OTP_TTL_MINUTES;
         
         // Create the magic link
-        $link = "http://localhost/internalization_management/users/reset_password.php?email=" . urlencode($toEmail) . "&otp=" . urlencode($otp);
+        $link = rtrim($baseUrl, '/') . '/public/reset_password.php?email=' . urlencode($toEmail) . '&otp=' . urlencode($otp);
 
         $mail->Body =
             '<div style="font-family:Arial,Helvetica,sans-serif;color:#1e2740;line-height:1.6;max-width:520px">'
           . '<h2 style="color:#0b1f4a;margin:0 0 12px;font-size:20px">Password Reset Request</h2>'
-          . '<p>Use the code below to reset your PSU Internalization password:</p>'
+          . '<p>Use the code below to reset your PSU Internationalization password:</p>'
           . '<p style="font-size:30px;font-weight:bold;letter-spacing:8px;color:#0b1f4a;margin:16px 0;'
           . 'padding:12px 20px;background:#f0f4ff;border-radius:8px;text-align:center;display:inline-block">'
           . $safeOtp . '</p>'
           . '<p style="margin: 24px 0;">'
-          . '<a href="' . $link . '" style="background:#0b1f4a;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;">Click here to reset your password</a>'
+          . '<a href="' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '" style="background:#0b1f4a;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;">Click here to reset your password</a>'
           . '</p>'
           . '<p style="color:#64748b;font-size:13px">This link and code expire in ' . $ttl . ' minutes. '
           . 'If you didn\'t request this, you can safely ignore this email.</p>'
           . '</div>';
 
         $mail->AltBody =
-            "PSU Internalization password reset\n"
+            "PSU Internationalization password reset\n"
           . "----------------------------------\n"
           . "Your verification code is: {$otp}\n"
           . "It expires in {$ttl} minutes.\n"
@@ -293,18 +297,18 @@ function auth_open(string $title): void { ?>
         <div class="auth-form-side">
           <div class="auth-mobile-brand">
             <div class="brand-mark"><img src="../asset/img/psu_logo.png" alt="PSU logo" /></div>
-            <div><strong>PSU <b>Internalization</b></strong><small>Gateway to Global Opportunities</small></div>
+            <div><strong>PSU <b>Internationalization</b></strong><small>Gateway to Global Opportunities</small></div>
           </div>
 <?php }
 
 function auth_close(string $label, string $titleHtml, string $text): void { ?>
-          <div class="auth-footer">&copy; 2026 Pangasinan State University · PSU Internalization</div>
+          <div class="auth-footer">&copy; 2026 Pangasinan State University · PSU Internationalization</div>
         </div>
 
         <div class="auth-welcome-side">
           <div class="welcome-brand">
             <div class="brand-mark"><img src="../asset/img/psu_logo.png" alt="PSU logo" /></div>
-            <div class="brand-text"><strong>PSU</strong><span>INTERNALIZATION</span></div>
+            <div class="brand-text"><strong>PSU</strong><span>INTERNATIONALIZATION</span></div>
           </div>
 
           <div class="welcome-label"><?= e($label) ?></div>

@@ -4,10 +4,10 @@
 ========================= */
 
 .content-card {
-    background: var(--surface);
+    background: var(--white);
     padding: 32px;
     border-radius: 20px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--gray-200);
     box-shadow: 0 1px 3px rgba(0,0,0,0.02), 0 10px 20px -10px rgba(0,0,0,0.04);
     width: 100%;
 }
@@ -17,19 +17,19 @@
     align-items: center;
     gap: 16px;
     padding-bottom: 24px;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--gray-100);
     margin-bottom: 24px;
 }
 
 .page-header-icon {
     width: 48px;
     height: 48px;
-    background: var(--navy);
+    background: var(--navy-800);
     border-radius: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--blue-light);
+    color: var(--gold);
     font-size: 20px;
     flex-shrink: 0;
 }
@@ -37,14 +37,14 @@
 .page-header h2 {
     font-size: 1.2rem;
     font-weight: 800;
-    color: var(--ink);
+    color: var(--navy-800);
     margin: 0 0 4px;
-    font-family: var(--font-sans);
+    font-family: var(--font-display);
 }
 
 .page-header p {
     font-size: 0.85rem;
-    color: var(--text-soft);
+    color: var(--gray-500);
     margin: 0;
 }
 
@@ -59,8 +59,8 @@
     align-items: center;
     gap: 10px;
 }
-.alert-success { background: var(--success-bg); border: 1px solid var(--success); color: var(--success); }
-.alert-error { background: var(--danger-bg); border: 1px solid var(--danger); color: var(--danger); }
+.alert-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: var(--green); }
+.alert-error { background: #fef2f2; border: 1px solid #fecaca; color: var(--red); }
 
 /* CHECKLIST */
 .checklist-wrapper {
@@ -68,16 +68,16 @@
 }
 
 .checklist-wrapper h3 {
-    font-family: var(--font-sans);
+    font-family: var(--font-display);
     font-weight: 800;
-    color: var(--ink);
+    color: var(--navy-800);
     margin: 0 0 4px;
     font-size: 1.1rem;
 }
 
 .checklist-desc {
     font-size: 0.85rem;
-    color: var(--text-soft);
+    color: var(--gray-500);
     margin: 0 0 20px;
 }
 
@@ -92,15 +92,15 @@
     align-items: center;
     gap: 16px;
     padding: 20px;
-    background: var(--bg);
-    border: 1px solid var(--border);
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
     border-radius: 14px;
     transition: all 0.2s;
 }
 
 .checklist-item:hover {
-    background: var(--surface);
-    border-color: var(--blue-light);
+    background: var(--white);
+    border-color: var(--gray-300);
     box-shadow: var(--shadow-sm);
 }
 
@@ -113,8 +113,8 @@
     width: 40px;
     height: 40px;
     border-radius: 50%;
-    background: var(--border);
-    color: var(--text-soft);
+    background: var(--gray-200);
+    color: var(--gray-500);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -123,8 +123,8 @@
 }
 
 .checklist-item.completed .checklist-icon {
-    background: var(--success);
-    color: var(--surface);
+    background: var(--green);
+    color: var(--white);
 }
 
 .checklist-info {
@@ -134,7 +134,7 @@
 
 .checklist-info strong {
     display: block;
-    color: var(--ink);
+    color: var(--navy-800);
     font-size: 0.95rem;
     font-weight: 700;
     margin-bottom: 4px;
@@ -142,7 +142,7 @@
 
 .checklist-info small {
     display: block;
-    color: var(--text-soft);
+    color: var(--gray-500);
     font-size: 0.8rem;
 }
 
@@ -164,8 +164,8 @@
     align-items: center;
     gap: 8px;
     padding: 10px 18px;
-    background: var(--ink);
-    color: var(--surface);
+    background: var(--navy-800);
+    color: var(--white);
     border-radius: 8px;
     font-size: 0.8rem;
     font-weight: 700;
@@ -174,8 +174,8 @@
 }
 
 .upload-btn:hover {
-    background: var(--blue);
-    color: var(--surface);
+    background: var(--gold);
+    color: var(--navy-800);
 }
 
 .upload-btn input[type="file"] {
@@ -197,75 +197,3 @@
         justify-content: center;
     }
 }
-
-
-.approval-banner {
-    display: flex; gap: 16px; padding: 20px; border-radius: 14px;
-    background: linear-gradient(135deg, #ecfdf5, #d1fae5);
-    border: 1px solid #a7f3d0; margin-bottom: 24px;
-}
-.approval-banner .banner-icon { font-size: 32px; }
-.approval-banner h3 { margin: 0 0 6px; color: #065f46; }
-
-.empty-state {
-    text-align: center; padding: 48px 20px; color: #64748b;
-}
-.empty-state h3 { margin: 0 0 8px; color: #334155; }
-
-.stat-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 16px; margin-bottom: 28px;
-}
-.stat-card {
-    display: flex; align-items: center; gap: 14px;
-    padding: 18px; background: #f8fafc; border-radius: 12px;
-}
-.stat-card i { font-size: 24px; color: #2563eb; }
-.stat-value { display: block; font-size: 24px; font-weight: 700; color: #0f172a; }
-.stat-label { font-size: 12px; color: #64748b; }
-
-.program-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 20px;
-}
-.program-card {
-    border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px;
-    background: #fff; display: flex; flex-direction: column; gap: 12px;
-}
-.program-card-head h3 { margin: 0 0 6px; font-size: 17px; }
-.country-chip { font-size: 12px; color: #64748b; }
-.program-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: #64748b; }
-.program-card-actions { margin-top: auto; display: flex; gap: 8px; align-items: center; }
-
-.placement-card {
-    padding: 24px; background: #f0fdf4; border: 1px solid #bbf7d0;
-    border-radius: 12px; margin: 20px 0;
-}
-.placement-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 16px; margin: 16px 0;
-}
-.placement-grid label { display: block; font-size: 12px; color: #64748b; margin-bottom: 4px; }
-.placement-note { margin-top: 16px; }
-
-.submit-bar {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 16px 20px; background: #f8fafc; border-radius: 10px; margin-top: 24px;
-}
-
-.status-badge {
-    padding: 3px 10px; border-radius: 99px; font-size: 12px; font-weight: 600;
-}
-.status-draft         { background:#e2e8f0; color:#475569; }
-.status-pending       { background:#fef3c7; color:#92400e; }
-.status-under_review  { background:#dbeafe; color:#1e40af; }
-.status-approved      { background:#d1fae5; color:#065f46; }
-.status-rejected      { background:#fee2e2; color:#991b1b; }
-.status-withdrawn     { background:#f1f5f9; color:#64748b; }
-
-.nav-badge {
-    margin-left: auto; background: #dc2626; color: #fff;
-    padding: 2px 7px; border-radius: 99px; font-size: 11px; font-weight: 600;
-}
-
-.badge-error { background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 6px; font-size: 11px; }

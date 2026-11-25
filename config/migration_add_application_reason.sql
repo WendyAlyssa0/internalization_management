@@ -1,0 +1,2 @@
+ALTER TABLE applications
+    ADD COLUMN IF NOT EXISTS reason VARCHAR(500) NULL AFTER program_id;

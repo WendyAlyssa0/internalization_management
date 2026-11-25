@@ -1,25 +1,79 @@
 <?php
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/roles.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+requireLogin();
+
 $pdo = db();
 
+/* ===================================================
+   DOWNLOAD HANDLER — available to any logged-in user
+   =================================================== */
+if (isset($_GET['download_id'])) {
+    $formId = (int)$_GET['download_id'];
+    $stmt = $pdo->prepare("SELECT file_path FROM forms WHERE id = ?");
+    $stmt->execute([$formId]);
+    $relativePath = $stmt->fetchColumn();
+
+    if (!is_string($relativePath) || !str_starts_with($relativePath, 'uploads/forms/')) {
+        http_response_code(404);
+        exit('Form not found.');
+    }
+
+    $uploadsRoot = realpath(__DIR__ . '/../uploads');
+    $fullPath    = realpath(__DIR__ . '/../' . $relativePath);
+
+    if (
+        $uploadsRoot === false ||
+        $fullPath === false ||
+        !str_starts_with($fullPath, $uploadsRoot . DIRECTORY_SEPARATOR) ||
+        !is_file($fullPath)
+    ) {
+        http_response_code(404);
+        exit('Form not found.');
+    }
+
+    $mimeType = (new finfo(FILEINFO_MIME_TYPE))->file($fullPath) ?: 'application/octet-stream';
+    $filename = str_replace('"', '', basename($fullPath));
+
+    header('Content-Type: ' . $mimeType);
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('X-Content-Type-Options: nosniff');
+    readfile($fullPath);
+    exit;
+}
+
+/* ===================================================
+   STAFF-ONLY from this point
+   =================================================== */
+if (!canManagePrograms()) {
+    http_response_code(403);
+    exit('Forbidden — you do not have permission to manage forms.');
+}
+
+/* ===================================================
+   PAGINATION
+   =================================================== */
 $limit  = 10;
 $page   = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
 $offset = ($page - 1) * $limit;
 
-/* CSRF TOKEN */
+/* ===================================================
+   CSRF TOKEN
+   =================================================== */
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 $csrfToken = $_SESSION['csrf_token'];
 
-function checkCsrf(): void {
+function checkCsrf(): void
+{
     $sent = $_POST['csrf_token'] ?? '';
-    if (!isset($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $sent)) {
+    if (!isset($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], (string)$sent)) {
         http_response_code(403);
         echo json_encode(['ok' => false, 'error' => 'Invalid CSRF token']);
         exit();
@@ -27,37 +81,147 @@ function checkCsrf(): void {
 }
 
 if (!function_exists('h')) {
-    function h($value): string {
+    function h($value): string
+    {
         return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
     }
 }
 
 /* ===================================================
-   AJAX ENDPOINT (add form)
+   FILE HELPERS
    =================================================== */
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add') {
+function saveManagedFormFile(array $file): string
+{
+    $uploadError = $file['error'] ?? UPLOAD_ERR_NO_FILE;
+    if ($uploadError === UPLOAD_ERR_INI_SIZE || $uploadError === UPLOAD_ERR_FORM_SIZE) {
+        throw new RuntimeException('The form file exceeds the 10 MB upload limit.');
+    }
+    if ($uploadError !== UPLOAD_ERR_OK) {
+        throw new RuntimeException('Choose a form file to upload.');
+    }
+    if (($file['size'] ?? 0) <= 0 || $file['size'] > 10 * 1024 * 1024 || !is_uploaded_file($file['tmp_name'])) {
+        throw new RuntimeException('Choose a valid form file no larger than 10 MB.');
+    }
+
+    $extensions = [
+        'application/pdf' => 'pdf',
+        'application/msword' => 'doc',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+    ];
+    $mimeType = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+    if (!isset($extensions[$mimeType])) {
+        throw new RuntimeException('Only PDF, DOC, or DOCX forms are allowed.');
+    }
+
+    $directory = __DIR__ . '/../uploads/forms';
+    if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
+        error_log('Unable to create the managed forms upload directory.');
+        throw new RuntimeException('The upload location is unavailable. Please try again.');
+    }
+
+    $filename = bin2hex(random_bytes(16)) . '.' . $extensions[$mimeType];
+    if (!move_uploaded_file($file['tmp_name'], $directory . DIRECTORY_SEPARATOR . $filename)) {
+        throw new RuntimeException('The form file could not be saved.');
+    }
+
+    return 'uploads/forms/' . $filename;
+}
+
+function deleteManagedFormFile(?string $path): void
+{
+    if (!is_string($path) || !str_starts_with($path, 'uploads/forms/')) {
+        return;
+    }
+
+    $file = __DIR__ . '/../uploads/forms/' . basename($path);
+    if (is_file($file) && !unlink($file)) {
+        error_log('Unable to delete managed form file: ' . $file);
+    }
+}
+
+/* ===================================================
+   AJAX ENDPOINT (create or update form)
+   =================================================== */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save') {
     header('Content-Type: application/json');
     checkCsrf();
 
-    $form_name = trim((string)($_POST['form_name'] ?? ''));
-    $form_type = trim((string)($_POST['form_type'] ?? ''));
-    $file_path = trim((string)($_POST['file_path'] ?? ''));
-    $status    = ($_POST['status'] ?? 'active') === 'inactive' ? 'inactive' : 'active';
+    $formId   = (int)($_POST['id'] ?? 0);
+    $formName = trim((string)($_POST['form_name'] ?? ''));
+    $status   = ($_POST['status'] ?? 'active') === 'inactive' ? 'inactive' : 'active';
+    $formType = ($_POST['form_type'] ?? 'downloadable') === 'online' ? 'online' : 'downloadable';
+    $formSchema = trim((string)($_POST['form_schema'] ?? ''));
 
-    if ($form_name === '' || $file_path === '') {
-        echo json_encode(['ok' => false, 'message' => 'Form name and file path are required.']);
+    if ($formName === '') {
+        echo json_encode(['ok' => false, 'message' => 'Form name is required.']);
         exit();
     }
 
+    $oldPath = null;
+    $oldType = null;
+    if ($formId > 0) {
+        $existing = $pdo->prepare('SELECT file_path, form_type FROM forms WHERE id = ?');
+        $existing->execute([$formId]);
+        $existingRow = $existing->fetch(PDO::FETCH_ASSOC);
+        if (!$existingRow) {
+            echo json_encode(['ok' => false, 'message' => 'Form not found.']);
+            exit();
+        }
+        $oldPath = $existingRow['file_path'];
+        $oldType = $existingRow['form_type'];
+    }
+
+    $file    = $_FILES['form_file'] ?? ['error' => UPLOAD_ERR_NO_FILE];
+    $newPath = null;
+
     try {
-        $stmt = $pdo->prepare("
-            INSERT INTO forms (form_name, form_type, file_path, status)
-            VALUES (?, ?, ?, ?)
-        ");
-        $stmt->execute([$form_name, $form_type, $file_path, $status]);
-        echo json_encode(['ok' => true, 'message' => 'Form added successfully.']);
+        if ($formType === 'downloadable') {
+            if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+                $newPath = saveManagedFormFile($file);
+            } elseif ($formId === 0 || !is_string($oldPath) || !str_starts_with($oldPath, 'uploads/forms/')) {
+                echo json_encode(['ok' => false, 'message' => 'Upload a PDF, DOC, or DOCX form file.']);
+                exit();
+            }
+        } elseif ($formSchema === '') {
+            echo json_encode(['ok' => false, 'message' => 'Enter the JSON field schema for the online form.']);
+            exit();
+        } else {
+            json_decode($formSchema, true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                echo json_encode(['ok' => false, 'message' => 'The online form schema must be valid JSON.']);
+                exit();
+            }
+        }
+
+        $filePath = $newPath ?? $oldPath;
+
+        if ($formId > 0) {
+            $stmt = $pdo->prepare("
+                UPDATE forms
+                SET form_name = ?, form_type = ?, file_path = ?, form_schema = ?, status = ?
+                WHERE id = ?
+            ");
+            $stmt->execute([$formName, $formType, $formType === 'downloadable' ? $filePath : null, $formType === 'online' ? $formSchema : null, $status, $formId]);
+        } else {
+            $stmt = $pdo->prepare("
+                INSERT INTO forms (form_name, form_type, file_path, form_schema, status)
+                VALUES (?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([$formName, $formType, $formType === 'downloadable' ? $filePath : null, $formType === 'online' ? $formSchema : null, $status]);
+        }
+
+        if ($newPath !== null && is_string($oldPath) && $oldPath !== $newPath) {
+            deleteManagedFormFile($oldPath);
+        }
+
+        echo json_encode(['ok' => true, 'message' => 'Form saved successfully.']);
+    } catch (RuntimeException $e) {
+        if ($newPath !== null) deleteManagedFormFile($newPath);
+        echo json_encode(['ok' => false, 'message' => $e->getMessage()]);
     } catch (PDOException $e) {
-        echo json_encode(['ok' => false, 'message' => 'Database error. Please try again.']);
+        if ($newPath !== null) deleteManagedFormFile($newPath);
+        error_log('Managed form save failed: ' . $e->getMessage());
+        echo json_encode(['ok' => false, 'message' => 'The form could not be saved. Please try again.']);
     }
     exit();
 }
@@ -76,20 +240,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 
     try {
+        $stmt = $pdo->prepare('SELECT file_path FROM forms WHERE id = ?');
+        $stmt->execute([$id]);
+        $filePath = $stmt->fetchColumn();
+
+        if ($filePath === false) {
+            echo json_encode(['ok' => false, 'message' => 'Form not found.']);
+            exit();
+        }
+
         $stmt = $pdo->prepare("DELETE FROM forms WHERE id = ?");
         $stmt->execute([$id]);
+
+        deleteManagedFormFile(is_string($filePath) ? $filePath : null);
+
         echo json_encode(['ok' => true, 'message' => 'Form deleted successfully.']);
     } catch (PDOException $e) {
+        error_log('Managed form delete failed: ' . $e->getMessage());
         echo json_encode(['ok' => false, 'message' => 'Database error. Please try again.']);
     }
     exit();
 }
 
-/* TOTAL RECORDS */
+/* ===================================================
+   FETCH DATA
+   =================================================== */
 $totalCount = (int)$pdo->query("SELECT COUNT(*) FROM forms")->fetchColumn();
 $totalPages = max(1, (int)ceil($totalCount / $limit));
 
-/* FETCH PAGINATED DATA */
 $stmt = $pdo->prepare("SELECT * FROM forms ORDER BY id DESC LIMIT :limit OFFSET :offset");
 $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
 $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -122,7 +300,6 @@ $forms = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <thead>
                 <tr>
                     <th>Form Name</th>
-                    <th>Form Type</th>
                     <th>File</th>
                     <th>Status</th>
                     <th>Action</th>
@@ -143,10 +320,9 @@ $forms = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                     </div>
                                 </div>
                             </td>
-                            <td><?= h($f['form_type'] ?? '') ?: '<span class="text-muted">—</span>' ?></td>
                             <td>
                                 <?php if (!empty($f['file_path'])): ?>
-                                    <a href="<?= h($f['file_path']) ?>" target="_blank" rel="noopener" class="download-link">
+                                    <a href="dashboard.php?page=forms&amp;download_id=<?= (int)$f['id'] ?>" class="download-link">
                                         <i class="fa-solid fa-file-arrow-down"></i> Download
                                     </a>
                                 <?php else: ?>
@@ -161,6 +337,12 @@ $forms = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <td>
                                 <div class="actions">
                                     <button type="button"
+                                            class="action-btn edit-btn"
+                                            title="Edit"
+                                            data-form="<?= h(json_encode($f, JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP)) ?>">
+                                        <i class="fa fa-pen"></i>
+                                    </button>
+                                    <button type="button"
                                             class="action-btn delete-btn"
                                             title="Delete"
                                             data-id="<?= (int)$f['id'] ?>">
@@ -172,7 +354,7 @@ $forms = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <?php endforeach; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="5">
+                        <td colspan="4">
                             <div class="empty-state">
                                 <div class="empty-state-icon">
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -236,8 +418,8 @@ $forms = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <i class="fa fa-file-circle-plus"></i>
                 </div>
                 <div>
-                    <h3>Add Application Form</h3>
-                    <p class="modal-subtitle">Register a new downloadable form.</p>
+                    <h3 id="formModalTitle">Add Application Form</h3>
+                    <p class="modal-subtitle">Upload a downloadable application form for students.</p>
                 </div>
             </div>
             <button class="modal-close" onclick="closeModal('addModal')">
@@ -245,9 +427,10 @@ $forms = $stmt->fetchAll(PDO::FETCH_ASSOC);
             </button>
         </div>
 
-        <form id="addForm">
+        <form id="addForm" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
-            <input type="hidden" name="action" value="add">
+            <input type="hidden" name="action" value="save">
+            <input type="hidden" name="id" value="">
 
             <div class="modal-body">
 
@@ -262,20 +445,24 @@ $forms = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
                 <div class="form-group">
                     <label class="form-label">
-                        <i class="fa fa-tags"></i> Form Type
+                        <i class="fa fa-list-check"></i> Form Type *
                     </label>
-                    <input type="text" name="form_type" class="form-input"
-                           placeholder="Example: PDF, DOCX"
-                           maxlength="50">
+                    <select name="form_type" class="form-input" onchange="toggleFormFields(this.value)">
+                        <option value="downloadable">Downloadable File</option>
+                        <option value="online">Fill Online</option>
+                    </select>
                 </div>
 
-                <div class="form-group">
-                    <label class="form-label">
-                        <i class="fa fa-link"></i> File Path / URL *
-                    </label>
-                    <input type="text" name="file_path" class="form-input"
-                           placeholder="Example: /uploads/forms/exchange_application.pdf"
-                           required maxlength="255">
+                <div class="form-group" id="formFileGroup">
+                    <label class="form-label"><i class="fa fa-upload"></i> Form File *</label>
+                    <input type="file" name="form_file" class="form-input" accept=".pdf,.doc,.docx" required>
+                    <small>PDF, DOC, or DOCX (max 10 MB).</small>
+                </div>
+
+                <div class="form-group" id="formSchemaGroup" style="display:none;">
+                    <label class="form-label"><i class="fa fa-code"></i> Online Field Schema (JSON) *</label>
+                    <textarea name="form_schema" class="form-input" rows="8" placeholder='[{"name":"passport_number","label":"Passport Number","type":"text","required":true}]'></textarea>
+                    <small>Allowed types: text, email, date, textarea, select.</small>
                 </div>
 
                 <div class="form-group">
@@ -306,6 +493,21 @@ $forms = $stmt->fetchAll(PDO::FETCH_ASSOC);
 <script>
 window.FORMS_CSRF = <?= json_encode($csrfToken) ?>;
 
+function toggleFormFields(type) {
+    const fileGroup = document.getElementById('formFileGroup');
+    const schemaGroup = document.getElementById('formSchemaGroup');
+    const fileInput = document.querySelector('#addForm [name="form_file"]');
+    if (type === 'online') {
+        fileGroup.style.display = 'none';
+        schemaGroup.style.display = '';
+        fileInput.required = false;
+    } else {
+        fileGroup.style.display = '';
+        schemaGroup.style.display = 'none';
+        fileInput.required = document.querySelector('#addForm [name="id"]').value === '';
+    }
+}
+
 /* ── Modal helpers ── */
 function openModal(id) {
     document.getElementById(id).classList.add('open');
@@ -326,11 +528,40 @@ document.addEventListener('keydown', e => {
 });
 
 function openAddModal() {
-    document.getElementById('addForm').reset();
+    const form = document.getElementById('addForm');
+    form.reset();
+    form.elements.id.value = '';
+    form.elements.action.value = 'save';
+    form.elements.form_file.required = true;
+    form.elements.form_type.value = 'downloadable';
+    form.elements.form_schema.value = '';
+    toggleFormFields('downloadable');
+    document.getElementById('formModalTitle').textContent = 'Add Application Form';
+    form.querySelector('[type="submit"]').innerHTML = '<i class="fa fa-floppy-disk"></i> Save Form';
     openModal('addModal');
 }
 
-/* ── ADD form submit (AJAX) ── */
+document.getElementById('formsBody').addEventListener('click', function (event) {
+    const button = event.target.closest('.edit-btn');
+    if (!button) return;
+
+    const formData = JSON.parse(button.dataset.form);
+    const form = document.getElementById('addForm');
+    form.reset();
+    form.elements.id.value = formData.id;
+    form.elements.action.value = 'save';
+    form.elements.form_name.value = formData.form_name || '';
+    form.elements.status.value = formData.status || 'active';
+    form.elements.form_type.value = formData.form_type || 'downloadable';
+    form.elements.form_schema.value = formData.form_schema || '';
+    toggleFormFields(formData.form_type || 'downloadable');
+    form.elements.form_file.required = (formData.form_type || 'downloadable') === 'downloadable';
+    document.getElementById('formModalTitle').textContent = 'Edit Application Form';
+    form.querySelector('[type="submit"]').innerHTML = '<i class="fa fa-floppy-disk"></i> Update Form';
+    openModal('addModal');
+});
+
+/* ── Save form (AJAX) ── */
 document.getElementById('addForm').addEventListener('submit', function (e) {
     e.preventDefault();
     const form = this;

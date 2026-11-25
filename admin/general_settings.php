@@ -5,6 +5,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/auth_middleware.php';
 requireAdmin();
 
@@ -36,10 +37,66 @@ function h($value): string {
 }
 
 /* =========================
+   SAVE SETTINGS (POST HANDLER)
+========================= */
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Verify CSRF
+    if (!hash_equals($csrfToken, $_POST['csrf_token'] ?? '')) {
+        http_response_code(403);
+        die('Invalid CSRF token.');
+    }
+
+    try {
+        $pdo = db();
+        
+        // Array of text/number fields
+        $fields = [
+            'system_name', 'organization', 'academic_year', 'semester',
+            'session_timeout', 'password_length', 'login_attempts',
+            'maintenance_message', 'smtp_host', 'smtp_port', 'smtp_email', 'smtp_sender'
+        ];
+
+        $updateStmt = $pdo->prepare("
+            INSERT INTO settings (setting_key, setting_value) 
+            VALUES (?, ?) 
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
+        ");
+
+        foreach ($fields as $key) {
+            if (isset($_POST[$key])) {
+                $updateStmt->execute([$key, trim($_POST[$key])]);
+            }
+        }
+
+        // Handle Checkboxes (1 if checked, 0 if not)
+        $toggles = ['allow_registration', 'email_verification', 'maintenance_mode'];
+        foreach ($toggles as $key) {
+            $val = isset($_POST[$key]) ? '1' : '0';
+            $updateStmt->execute([$key, $val]);
+        }
+
+        // Handle Password (Only update if not blank)
+        if (!empty($_POST['smtp_password'])) {
+            // Note: If your system encrypts/hashes passwords, do it here.
+            $updateStmt->execute(['smtp_password', trim($_POST['smtp_password'])]);
+        }
+
+        $_SESSION['settings_flash'] = ['type' => 'success', 'message' => 'Settings saved successfully.'];
+        
+    } catch (Throwable $e) {
+        error_log('settings save: ' . $e->getMessage());
+        $_SESSION['settings_flash'] = ['type' => 'error', 'message' => 'Failed to save settings.'];
+    }
+
+    // Redirect to prevent form resubmission on refresh
+    header('Location: dashboard.php?page=settings');
+    exit;
+}
+
+/* =========================
    LOAD CURRENT SETTINGS
 ========================= */
 $settings = [];
-
 try {
     $pdo = db();
     $stmt = $pdo->query("SELECT setting_key, setting_value FROM settings");
@@ -50,7 +107,6 @@ try {
     error_log('general_settings load: ' . $e->getMessage());
 }
 
-/* Fallback to defaults if a key is missing */
 function setting(array $settings, string $key, string $default = ''): string {
     return $settings[$key] ?? $default;
 }
@@ -59,11 +115,9 @@ function settingBool(array $settings, string $key, bool $default = false): bool 
     return in_array(strtolower($settings[$key]), ['1', 'true', 'yes', 'on'], true);
 }
 
-/* Flash message from save_settings.php (optional) */
+/* Flash message */
 $flash = $_SESSION['settings_flash'] ?? null;
 unset($_SESSION['settings_flash']);
-
-$saveUrl = 'dashboard.php?page=settings';
 ?>
 
 <link rel="stylesheet" href="../asset/css/general_settings.css">
@@ -73,7 +127,7 @@ $saveUrl = 'dashboard.php?page=settings';
 
     <div class="page-header">
         <h2>General Settings</h2>
-        <p>Configure system-wide settings for the Internalization Management System.</p>
+        <p>Configure system-wide settings for the Internationalization Management System.</p>
     </div>
 
     <?php if ($flash): ?>
@@ -83,7 +137,8 @@ $saveUrl = 'dashboard.php?page=settings';
         </div>
     <?php endif; ?>
 
-    <form method="POST" action="<?= h($saveUrl) ?>" class="settings-form">
+    <!-- Remove action so it POSTs to the current URL (dashboard.php?page=settings) -->
+    <form method="POST" class="settings-form">
         <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
 
         <!-- System Information -->
@@ -97,7 +152,7 @@ $saveUrl = 'dashboard.php?page=settings';
                 <div class="form-group col-6">
                     <label for="system_name">System Name</label>
                     <input type="text" id="system_name" name="system_name"
-                           value="<?= h(setting($settings, 'system_name', 'PSU Internalization Management System')) ?>"
+                           value="<?= h(setting($settings, 'system_name', 'PSU Internationalization Management System')) ?>"
                            maxlength="150">
                 </div>
 

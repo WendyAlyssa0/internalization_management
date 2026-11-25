@@ -167,6 +167,19 @@
     }
   });
 
+  // Inside your edit-btn click handler:
+const btn = e.target.closest('.edit-btn');
+document.getElementById('formId').value = btn.dataset.id;
+document.getElementById('agreement_name').value = btn.dataset.name;
+document.getElementById('description').value = btn.dataset.desc;
+
+// ADD THESE TWO LINES:
+document.getElementById('start_date').value = btn.dataset.start || '';
+document.getElementById('end_date').value = btn.dataset.end || '';
+
+document.getElementById('status').value = btn.dataset.status;
+// ... rest of your modal open logic
+
   /* ── row count ── */
   function updateCount() {
     const n = body.querySelectorAll("tr:not(.empty-row)").length;

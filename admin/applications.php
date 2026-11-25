@@ -1,16 +1,26 @@
 ﻿<?php
 require_once __DIR__ . '/../config/db.php';
-
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/../config/roles.php'; // Include the helper
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: ../public/login.php');
     exit();
 }
 
+// Allow Coordinators, Approvers, Admins, and Super Admins to view this page
+if (!canManageActivities() && !isApprover() && !isAdmin()) {
+    http_response_code(403);
+    exit('Forbidden — you do not have permission to view applications.');
+}
+
+// Generate CSRF for the AJAX actions
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrfToken = $_SESSION['csrf_token'];
+
 $pdo = db();
+// ... rest of your code (function h, filters, pagination, etc.) ...
 
 function h($value): string {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
@@ -530,15 +540,23 @@ function sortHeader(string $label, string $col, string $sort, string $order): st
                             <button class="btn-view" onclick='openModal(<?= htmlspecialchars(json_encode($a), ENT_QUOTES) ?>)' title="View">
                                 <i class="fa fa-eye"></i>
                             </button>
-                            <button class="btn-approve" onclick="confirmAction('approve', <?= h($a['id']) ?>)" title="Approve">
-                                <i class="fa fa-check"></i>
-                            </button>
-                            <button class="btn-reject" onclick="confirmAction('reject', <?= h($a['id']) ?>)" title="Reject">
-                                <i class="fa fa-close"></i>
-                            </button>
-                            <button class="btn-delete" onclick="confirmAction('delete', <?= h($a['id']) ?>)" title="Delete">
-                                <i class="fa fa-trash"></i>
-                            </button>
+                            
+                            <!-- Only Approvers and Super Admin can Approve/Reject -->
+                            <?php if (isApprover() || isSuperAdmin()): ?>
+                                <button class="btn-approve" onclick="confirmAction('approve', <?= h($a['id']) ?>)" title="Approve">
+                                    <i class="fa fa-check"></i>
+                                </button>
+                                <button class="btn-reject" onclick="confirmAction('reject', <?= h($a['id']) ?>) " title="Reject">
+                                    <i class="fa fa-close"></i>
+                                </button>
+                            <?php endif; ?>
+
+                            <!-- Only Admins and Super Admin can Delete -->
+                            <?php if (canManageSystem()): ?>
+                                <button class="btn-delete" onclick="confirmAction('delete', <?= h($a['id']) ?>)" title="Delete">
+                                    <i class="fa fa-trash"></i>
+                                </button>
+                            <?php endif; ?>
                         </div>
                     </td>
                 </tr>
@@ -601,7 +619,6 @@ function sortHeader(string $label, string $col, string $sort, string $order): st
             <div class="modal-section">
                 <h4>Application</h4>
                 <div class="modal-grid">
-                    <div class="modal-field"><label>ID</label><span id="m-id"></span></div>
                     <div class="modal-field"><label>Program</label><span id="m-program"></span></div>
                     <div class="modal-field"><label>Department</label><span id="m-department"></span></div>
                     <div class="modal-field"><label>Mobility Type</label><span id="m-mobility"></span></div>
@@ -685,7 +702,6 @@ function openModal(data) {
             return `<span class="status-badge status-${cls}">${status}</span>`;
         };
 
-        document.getElementById('m-id').textContent           = '#' + fmt(data.id);
         document.getElementById('m-name').textContent         = fmt(data.applicant_name);
         document.getElementById('m-email').textContent         = fmt(data.applicant_email);
         document.getElementById('m-program').textContent       = fmt(data.program);
@@ -793,6 +809,8 @@ function executeAction() {
 
     const formData = new FormData();
     formData.append('id', pendingId);
+    // ADD THIS LINE: Send the CSRF token
+    formData.append('csrf_token', '<?= $csrfToken ?>'); 
 
     fetch(routeMap[pendingAction], {
         method: 'POST',

@@ -68,7 +68,8 @@ function closeEditProgramOutside(e) {
 function loadPartners(countryId, selectedPartner) {
     fetch('get_partners_by_country.php?country_id=' + countryId)
         .then(res => res.json())
-        .then(partners => {
+        .then(response => {
+            const partners = Array.isArray(response) ? response : (response.data || []);
             const select = document.getElementById('edit_partner_id');
             select.innerHTML = '<option value="">Select Partner</option>';
             partners.forEach(partner => {
@@ -87,7 +88,8 @@ function loadAddPartners(countryId) {
     select.innerHTML = '<option value="">Loading...</option>';
     fetch('get_partners_by_country.php?country_id=' + countryId)
         .then(res => res.json())
-        .then(partners => {
+        .then(response => {
+            const partners = Array.isArray(response) ? response : (response.data || []);
             select.innerHTML = '<option value="">Select Partner</option>';
             if (!partners.length) {
                 select.innerHTML = '<option value="">No partners for this country</option>';

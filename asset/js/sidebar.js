@@ -31,7 +31,6 @@ document.addEventListener("DOMContentLoaded", () => {
   function toggleSidebar(open) {
     sidebar.classList.toggle('open', open);
     if (overlay) overlay.classList.toggle('visible', open);
-    if (openBtn) openBtn.setAttribute('aria-expanded', String(open));
     document.body.style.overflow = open ? 'hidden' : '';
   }
 

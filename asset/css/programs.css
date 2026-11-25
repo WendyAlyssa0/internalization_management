@@ -428,9 +428,11 @@
     background: rgba(15,32,68,.45);
     backdrop-filter: blur(3px);
     z-index: 1000;
-    align-items: flex-start;
+    
+    /* Center the modal */
+    align-items: center; 
     justify-content: center;
-    padding: 40px 20px;
+    padding: 20px;
     overflow-y: auto;
     animation: fadeIn 0.18s ease;
 }
@@ -450,12 +452,16 @@
     box-shadow: var(--shadow-modal);
     width: 100%;
     max-width: 640px;
-    max-height: calc(100vh - 80px);
-    margin: 0 auto;
+    
+    /* THE CRITICAL FIX: Force the box to never exceed screen height */
+    max-height: calc(100vh - 40px); 
+    
+    /* Flex layout to pin header/footer */
     display: flex;
     flex-direction: column;
+    
     animation: slideUp 0.22s ease;
-    overflow: hidden;
+    overflow: hidden; /* Clips the body scroll */
 }
 
 @keyframes slideUp {
@@ -463,16 +469,16 @@
     to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* Modal header */
 .modal-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 20px 24px;
     border-bottom: 1px solid var(--color-border);
-    flex-shrink: 0;
+    
+    /* Prevent header from shrinking */
+    flex-shrink: 0; 
 }
-
 .modal-header-left {
     display: flex;
     align-items: center;
@@ -528,8 +534,26 @@
 /* Modal body */
 .modal-body {
     padding: 22px;
-    overflow-y: auto;
+    overflow-y: auto; /* This makes the body scrollable */
+    
+    /* Critical Flex Fixes: 
+       flex: 1 allows it to fill space.
+       min-height: 0 is REQUIRED for overflow-y to work in a flex child */
     flex: 1;
+    min-height: 0; 
+}
+
+/* Modal footer */
+.modal-footer {
+    padding: 16px 22px;
+    border-top: 1px solid var(--color-border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    background: #fafafa;
+    
+    /* Prevent footer from shrinking or disappearing */
+    flex-shrink: 0; 
 }
 
 /* -------------------------

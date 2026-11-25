@@ -5,6 +5,9 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// Ensure roles helper is loaded
+require_once __DIR__ . '/../config/roles.php';
+
 $currentRole = strtolower(trim((string)($_SESSION['user_role'] ?? '')));
 $currentRole = str_replace('_', ' ', $currentRole);
 $isSuperAdmin = ($currentRole === 'super admin');
@@ -22,8 +25,14 @@ function openMenu(array $items, string $page): string {
     return array_key_exists($page, $items) ? 'open' : '';
 }
 
-$menus = [
-    'program_management' => [
+/* =========================================
+   DEFINE MENUS WITH PERMISSION CHECKS
+========================================= */
+$menus = [];
+
+// 1. Program Management
+if (canManagePrograms()) {
+    $menus['program_management'] = [
         'label' => 'Program Management', 'icon' => 'fa-solid fa-graduation-cap', 'group' => 'Management',
         'items' => [
             'programs'         => ['icon' => 'fa-solid fa-book', 'label' => 'Programs'],
@@ -31,65 +40,76 @@ $menus = [
             'agreement_types'  => ['icon' => 'fa-solid fa-file-contract', 'label' => 'Agreement Types'],
             'program_category' => ['icon' => 'fa-solid fa-layer-group', 'label' => 'Program Category'],
         ],
-    ],
-    'location_management' => [
+    ];
+}
+
+// 2. Location Management
+if (canManagePartners()) {
+    $menus['location_management'] = [
         'label' => 'Location Management', 'icon' => 'fa-solid fa-location-dot', 'group' => 'Management',
         'items' => [
             'countries_addresses' => ['icon' => 'fa-solid fa-earth-americas', 'label' => 'Country & Address'],
         ],
-    ],
-    'application_management' => [
+    ];
+}
+
+// 3. Application Management
+if (canManageActivities() || isApprover() || isAdmin()) {
+    $menus['application_management'] = [
         'label' => 'Application Management', 'icon' => 'fa-solid fa-file-pen', 'group' => 'Management',
         'items' => [
             'applications'        => ['icon' => 'fa-solid fa-file-lines', 'label' => 'Applications'],
             'documents'           => ['icon' => 'fa-solid fa-folder-open', 'label' => 'Submitted Documents'],
             'requirements'        => ['icon' => 'fa-solid fa-list-check', 'label' => 'Master Requirements'],
-            'program_requirements'=> ['icon' => 'fa-solid fa-link', 'label' => 'Program Requirements'], // NEW LINK
+            'program_requirements'=> ['icon' => 'fa-solid fa-link', 'label' => 'Program Requirements'],
         ],
-    ],
-    'student_mobility' => [
+    ];
+}
+
+// 4. Student Mobility
+if (canManageActivities() || isAdmin()) {
+    $menus['student_mobility'] = [
         'label' => 'Student Mobility', 'icon' => 'fa-solid fa-plane-departure', 'group' => 'Management',
         'items' => [
+            'inbound_students'  => ['icon' => 'fa-solid fa-user-graduate', 'label' => 'Inbound Students'],
+            'outbound_students' => ['icon' => 'fa-solid fa-user-tie', 'label' => 'Outbound Students'],
             'student_management' => ['icon' => 'fa-solid fa-users', 'label' => 'Student Directory'],
             'approved_students'  => ['icon' => 'fa-solid fa-user-check', 'label' => 'Approved Students'],
             'travel_information' => ['icon' => 'fa-solid fa-passport', 'label' => 'Travel Information'],
             'activity_reports'   => ['icon' => 'fa-solid fa-chart-line', 'label' => 'Activity Reports'],
         ],
+    ];
+}
+
+// 5. Communication
+$menus['communication'] = [
+    'label' => 'Communication', 'icon' => 'fa-solid fa-comments', 'group' => 'Management',
+    'items' => [
+        'notifications' => ['icon' => 'fa-solid fa-bell', 'label' => 'Notifications'],
+        'announcements' => ['icon' => 'fa-solid fa-bullhorn', 'label' => 'Announcements'],
     ],
-    'communication' => [
-        'label' => 'Communication', 'icon' => 'fa-solid fa-comments', 'group' => 'Management',
-        'items' => [
-            'notifications' => ['icon' => 'fa-solid fa-bell', 'label' => 'Notifications'],
-            'announcements' => ['icon' => 'fa-solid fa-bullhorn', 'label' => 'Announcements'],
-        ],
-    ],
-    'users' => [
+];
+
+// 6. Administration (Strict Admin/Super Admin Only)
+if (canManageSystem()) {
+    $menus['users'] = [
         'label' => 'Users', 'icon' => 'fa-solid fa-user-gear', 'group' => 'Administration',
         'items' => [
             'users' => ['icon' => 'fa-solid fa-users', 'label' => 'User Accounts'],
         ],
-    ],
-    'system_settings' => [
+    ];
+    $menus['system_settings'] = [
         'label' => 'System & Settings', 'icon' => 'fa-solid fa-gear', 'group' => 'Administration',
         'items' => [
             'settings' => ['icon' => 'fa-solid fa-sliders', 'label' => 'General Settings'],
         ],
-    ],
-    'audit_logs' => [
+    ];
+    $menus['audit_logs'] = [
         'label' => 'Audit Logs', 'icon' => 'fa-solid fa-clock-rotate-left', 'group' => 'Administration',
         'items' => [
             'audit_trail' => ['icon' => 'fa-solid fa-clock-rotate-left', 'label' => 'Audit Trail'],
         ],
-    ],
-];
-
-/* Filter menus based on role */
-$visibleMenus = [];
-foreach ($menus as $key => $menu) {
-    if ($key === 'users' || $key === 'system_settings' || $key === 'audit_logs') {
-        if (!$isSuperAdmin) continue; // Hide from regular admins
-    }
-    $visibleMenus[$key] = $menu;
+    ];
 }
 ?>
 <div class="sidebar-overlay" id="sidebarOverlay"></div>
@@ -98,7 +118,7 @@ foreach ($menus as $key => $menu) {
         <div class="brand">
             <img src="../asset/img/psu_logo.png" alt="PSU logo" class="brand-logo">
             <div class="brand-text">
-                <h4>PSU Internalization</h4>
+                <h4>PSU Internationalization</h4>
                 <small>Admin Portal</small>
             </div>
         </div>
@@ -116,7 +136,7 @@ foreach ($menus as $key => $menu) {
 
         <?php
         $lastGroup = null;
-        foreach ($visibleMenus as $menu):
+        foreach ($menus as $menu):
             if ($menu['group'] !== $lastGroup):
                 $lastGroup = $menu['group'];
         ?>

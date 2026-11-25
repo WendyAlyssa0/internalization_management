@@ -95,8 +95,17 @@ if ($user && password_verify($password, $user['password_hash'])) {
 
     $role = strtolower(trim($user['user_role'] ?? ''));
 
-    // -------- ONLY ADMIN / SUPER ADMIN MAY USE THIS PORTAL --------
-    if (!in_array($role, ['admin', 'ad', 'super admin', 'sa'], true)) {
+    // -------- ONLY ADMINISTRATIVE STAFF MAY USE THIS PORTAL --------
+    if (!in_array($role, [
+        'admin',
+        'ad',
+        'super admin',
+        'sa',
+        'campus coordinator',
+        'ovplia staff',
+        'approving official',
+        'bor secretary',
+    ], true)) {
         // Do NOT create a session. Do NOT set remember cookie.
         // Reuse the failed-attempt counter so credential guessing
         // against this page is still throttled.
@@ -176,7 +185,7 @@ if ($user && password_verify($password, $user['password_hash'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PSU Internalization</title>
+    <title>PSU Internationalization</title>
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=Oswald:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../asset/css/login.css">
 </head>
@@ -204,7 +213,7 @@ if ($user && password_verify($password, $user['password_hash'])) {
         <div class="left-content">
 
             <div class="left-eyebrow">Pangasinan State University</div>
-            <div class="left-title"><span class="accent">PSU</span><br>Internalization</div>
+            <div class="left-title"><span class="accent">PSU</span><br>Internationalization</div>
             <div class="left-underline"></div>
             <div class="left-sub">Connecting the university to its global partners &mdash; one linkage at a time.</div>
         </div>
@@ -273,7 +282,7 @@ if ($user && password_verify($password, $user['password_hash'])) {
         </form>
 
         <div class="form-footer">
-            &copy; <?= date('Y') ?> Pangasinan State University &nbsp;·&nbsp; PSU Internalization
+            &copy; <?= date('Y') ?> Pangasinan State University &nbsp;·&nbsp; PSU Internationalization
         </div>
     </div>
 

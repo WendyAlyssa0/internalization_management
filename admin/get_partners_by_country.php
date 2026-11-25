@@ -47,17 +47,37 @@ if ($countryId === false || $countryId === null || $countryId < 1) {
 try {
     $pdo = db();
 
-    // Check selected country
-    $chk = $pdo->prepare("
-        SELECT id
-        FROM countries_addresses
-        WHERE id = ?
-        LIMIT 1
-    ");
+    // The program forms use countries.id, while older address forms may send
+    // countries_addresses.id. Resolve both to the countries foreign key.
+    $resolvedCountryId = 0;
 
-    $chk->execute([$countryId]);
+    $stmt = $pdo->prepare("SELECT id, country_name FROM countries WHERE id = ? LIMIT 1");
+    $stmt->execute([$countryId]);
+    $country = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!$chk->fetchColumn()) {
+    if ($country) {
+        $resolvedCountryId = (int)$country['id'];
+    } else {
+        $stmt = $pdo->prepare("SELECT country_name FROM countries_addresses WHERE id = ? LIMIT 1");
+        $stmt->execute([$countryId]);
+        $countryName = (string)($stmt->fetchColumn() ?: '');
+
+        if ($countryName === '') {
+            respond(404, false, 'Country not found.');
+        }
+
+        $stmt = $pdo->prepare("SELECT id FROM countries WHERE country_name = ? LIMIT 1");
+        $stmt->execute([$countryName]);
+        $resolvedCountryId = (int)($stmt->fetchColumn() ?: 0);
+
+        if ($resolvedCountryId <= 0) {
+            $stmt = $pdo->prepare("INSERT INTO countries (country_name, status) VALUES (?, 'Active')");
+            $stmt->execute([$countryName]);
+            $resolvedCountryId = (int)$pdo->lastInsertId();
+        }
+    }
+
+    if ($resolvedCountryId <= 0) {
         respond(404, false, 'Country not found.');
     }
 
@@ -70,7 +90,7 @@ try {
         ORDER BY institution_name ASC
     ");
 
-    $stmt->execute([$countryId]);
+    $stmt->execute([$resolvedCountryId]);
 
     $partners = $stmt->fetchAll(PDO::FETCH_ASSOC);
 

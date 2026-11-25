@@ -1,0 +1,162 @@
+body.applicant-portal {
+    --sidebar-w: 226px;
+}
+
+body.applicant-portal .main-sidebar {
+    background: linear-gradient(180deg, #214b8a 0%, #173b73 100%);
+}
+
+body.applicant-portal .sidebar-header {
+    display: none;
+}
+
+body.applicant-portal .sidebar-menu {
+    padding: 20px 12px 24px;
+    font-family: Inter, system-ui, sans-serif;
+}
+
+body.applicant-portal .sidebar-group-label {
+    padding: 20px 12px 10px;
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+}
+
+body.applicant-portal .sidebar-group-label:first-of-type {
+    padding-top: 10px;
+}
+
+body.applicant-portal .sidebar-menu > li > a {
+    min-height: 42px;
+    margin: 2px 0;
+    padding: 10px 12px;
+    color: rgba(255, 255, 255, 0.82);
+    font-family: Inter, system-ui, sans-serif;
+}
+
+body.applicant-portal .sidebar-menu > li > a i {
+    color: rgba(255, 255, 255, 0.82);
+}
+
+body.applicant-portal .sidebar-menu > li > a:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+body.applicant-portal .sidebar-menu > li > a.top-link.active {
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+    color: #fff;
+}
+
+body.applicant-portal .sidebar-menu > li > a.top-link.active i {
+    color: #ffd438;
+}
+
+@media (max-width: 860px) {
+    body.applicant-portal .sidebar-header {
+        display: flex;
+        justify-content: flex-end;
+        padding: 14px;
+    }
+
+    body.applicant-portal .brand {
+        display: none;
+    }
+}
+
+.partner-directory-grid {
+    display: grid;
+    gap: 14px;
+}
+
+.partner-directory-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 18px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 10px;
+    background: #fff;
+}
+
+.partner-directory-card > i {
+    color: var(--blue, #1a4a8a);
+    font-size: 22px;
+}
+
+.partner-directory-card > div {
+    flex: 1;
+    min-width: 0;
+}
+
+.partner-directory-card h3,
+.mobility-schedule-details h3 {
+    margin: 0;
+    color: var(--text, #14233d);
+    font-size: 16px;
+}
+
+.partner-directory-card p,
+.partner-directory-card small,
+.mobility-schedule-details p {
+    display: block;
+    margin: 4px 0 0;
+    color: var(--muted, #6b7a8f);
+}
+
+.mobility-schedule-list {
+    display: grid;
+    gap: 12px;
+    padding: 0;
+    list-style: none;
+}
+
+.mobility-schedule-list li {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 16px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 10px;
+    background: #fff;
+}
+
+.mobility-schedule-date {
+    display: grid;
+    gap: 4px;
+    min-width: 145px;
+    color: var(--blue, #1a4a8a);
+}
+
+.mobility-schedule-date span {
+    color: var(--muted, #6b7a8f);
+    font-size: 12px;
+}
+
+.mobility-schedule-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.mobility-schedule-status {
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: #eef2f8;
+    color: var(--text, #14233d);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+    .partner-directory-card,
+    .mobility-schedule-list li {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .mobility-schedule-date {
+        min-width: 100%;
+    }
+}
