@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/roles.php'; // Includes session_start()
+require_once __DIR__ . '/role_helpers.php';
 
 /* =========================
    AUTHENTICATION

@@ -1,6 +1,7 @@
 ﻿<?php
 require_once __DIR__ . '/../config/db.php';
-require_once __DIR__ . '/../config/roles.php'; // Include the helper
+require_once __DIR__ . '/../config/roles.php';
+require_once __DIR__ . '/role_helpers.php';
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: ../public/login.php');
@@ -31,7 +32,9 @@ function h($value): string {
 ========================= */
 $search     = trim($_GET['search'] ?? '');
 $program    = trim($_GET['program'] ?? '');
-$department = trim($_GET['department'] ?? '');
+$campusId   = (int)($_GET['campus'] ?? 0);
+$degreeProgram = trim($_GET['degree_program'] ?? '');
+$applicantType = trim($_GET['applicant_type'] ?? '');
 $view       = $_GET['view'] ?? 'all';
 $sort       = $_GET['sort'] ?? 'created_at';
 $order      = strtoupper($_GET['order'] ?? 'DESC') === 'ASC' ? 'ASC' : 'DESC';
@@ -50,7 +53,7 @@ $allowedSort = [
     'id'         => 'a.id',
     'applicant'  => 'applicant_name',
     'program'    => 'p.program_name',
-    'department' => 'p.program_type',
+    'degree_program' => 'u.program',
     'status'     => 'p.status',
     'country'    => 'p.country_id',
     'created_at' => 'a.created_at',
@@ -80,9 +83,19 @@ if ($program !== '') {
     $params[] = $program;
 }
 
-if ($department !== '') {
-    $where .= " AND p.program_type = ?";
-    $params[] = $department;
+if ($campusId > 0) {
+    $where .= " AND u.campus_id = ?";
+    $params[] = $campusId;
+}
+
+if ($degreeProgram !== '') {
+    $where .= " AND u.program = ?";
+    $params[] = $degreeProgram;
+}
+
+if ($applicantType !== '') {
+    $where .= " AND LOWER(COALESCE(NULLIF(u.account_type, ''), u.user_role, '')) = ?";
+    $params[] = strtolower($applicantType);
 }
 
 if ($view === 'new') {
@@ -106,6 +119,30 @@ $countStmt = $pdo->prepare($countSql);
 $countStmt->execute($params);
 $totalApplications = (int)$countStmt->fetchColumn();
 
+$campuses = $pdo->query("SELECT id, campus_name FROM campuses WHERE status = 'active' ORDER BY campus_name")->fetchAll(PDO::FETCH_ASSOC);
+$degreeQuery = $pdo->prepare("
+    SELECT DISTINCT degree_program
+    FROM (
+        SELECT dp.program_name AS degree_program
+        FROM degree_programs dp
+        WHERE dp.status = 'active' AND (? = 0 OR dp.campus_id = ?)
+        UNION
+        SELECT u.program AS degree_program
+        FROM users u
+        WHERE u.program IS NOT NULL AND u.program <> ''
+          AND (? = 0 OR u.campus_id = ?)
+    ) degree_options
+    ORDER BY degree_program
+");
+$degreeQuery->execute([$campusId, $campusId, $campusId, $campusId]);
+$degreePrograms = $degreeQuery->fetchAll(PDO::FETCH_COLUMN);
+$applicantTypes = $pdo->query("
+    SELECT DISTINCT COALESCE(NULLIF(account_type, ''), user_role) AS applicant_type
+    FROM users
+    WHERE COALESCE(NULLIF(account_type, ''), user_role) IS NOT NULL
+    ORDER BY applicant_type
+")->fetchAll(PDO::FETCH_COLUMN);
+
 /* =========================
    DATA QUERY
 ========================= */
@@ -118,14 +155,18 @@ SELECT
     a.created_at,
     a.reviewed_at,
     p.program_name AS program,
-    p.program_type AS department,
-    p.country_id   AS country,
+    u.program AS degree_program,
+    campus.campus_name AS campus,
+    COALESCE(NULLIF(u.account_type, ''), u.user_role) AS applicant_type,
+    c.country_name AS country,
     a.status       AS status,
     CONCAT(u.first_name,' ',u.last_name) AS applicant_name,
     u.email AS applicant_email
 FROM applications a
 LEFT JOIN users u ON a.applicant_id = u.id
 LEFT JOIN programs p ON a.program_id = p.id
+LEFT JOIN campuses campus ON campus.id = u.campus_id
+LEFT JOIN countries c ON c.id = p.country_id
 $where
 ORDER BY $sortColumn $order
 LIMIT $limit OFFSET $offset
@@ -458,7 +499,7 @@ function sortHeader(string $label, string $col, string $sort, string $order): st
     <div class="toolbar">
         <div class="search-wrap">
             <i class="fa fa-search"></i>
-            <input type="text" id="searchInput" name="search" form="filterForm" placeholder="Search applications..." value="<?= h($search) ?>">
+            <input type="text" id="searchInput" name="search" form="filterForm" placeholder="Search by name / program" value="<?= h($search) ?>">
         </div>
         <div class="tabs">
             <a href="?view=all" class="<?= $view === 'all' ? 'active' : '' ?>">All</a>
@@ -471,16 +512,29 @@ function sortHeader(string $label, string $col, string $sort, string $order): st
         <input type="hidden" name="view" value="<?= h($view) ?>">
         <input type="hidden" name="sort" value="<?= h($sort) ?>">
         <input type="hidden" name="order" value="<?= h($order) ?>">
-        <select name="program">
-            <option value="">All Programs</option>
-            <option value="BSIT" <?= $program === 'BSIT' ? 'selected' : '' ?>>BSIT</option>
-            <option value="BSCS" <?= $program === 'BSCS' ? 'selected' : '' ?>>BSCS</option>
+        <select name="campus" aria-label="Campus">
+            <option value="0">All Campuses</option>
+            <?php foreach ($campuses as $campus): ?>
+                <option value="<?= (int)$campus['id'] ?>" <?= $campusId === (int)$campus['id'] ? 'selected' : '' ?>><?= h($campus['campus_name']) ?></option>
+            <?php endforeach; ?>
         </select>
-        <select name="department">
-            <option value="">All Departments</option>
-            <option value="IT" <?= $department === 'IT' ? 'selected' : '' ?>>IT</option>
-            <option value="Engineering" <?= $department === 'Engineering' ? 'selected' : '' ?>>Engineering</option>
-            <option value="Business" <?= $department === 'Business' ? 'selected' : '' ?>>Business</option>
+        <select name="degree_program" aria-label="Degree program">
+            <option value="">All Degree Programs</option>
+            <?php foreach ($degreePrograms as $degree): ?>
+                <option value="<?= h($degree) ?>" <?= $degreeProgram === $degree ? 'selected' : '' ?>><?= h($degree) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <select name="applicant_type" aria-label="Applicant type">
+            <option value="">All Applicant Types</option>
+            <?php foreach ($applicantTypes as $type): ?>
+                <option value="<?= h($type) ?>" <?= strtolower($applicantType) === strtolower((string)$type) ? 'selected' : '' ?>><?= h(ucwords((string)$type)) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <select name="program" aria-label="Program or event">
+            <option value="">All Programs / Events</option>
+            <?php foreach ($pdo->query("SELECT DISTINCT program_name FROM programs ORDER BY program_name")->fetchAll(PDO::FETCH_COLUMN) as $programName): ?>
+                <option value="<?= h($programName) ?>" <?= $program === $programName ? 'selected' : '' ?>><?= h($programName) ?></option>
+            <?php endforeach; ?>
         </select>
         <button type="submit"><i class="fa fa-filter"></i> Filter</button>
     </form>
@@ -491,7 +545,7 @@ function sortHeader(string $label, string $col, string $sort, string $order): st
                 <tr>
                     <th><?= sortHeader('Applicant', 'applicant', $sort, $order) ?></th>
                     <th><?= sortHeader('Program', 'program', $sort, $order) ?></th>
-                    <th><?= sortHeader('Department', 'department', $sort, $order) ?></th>
+                    <th><?= sortHeader('Degree Program', 'degree_program', $sort, $order) ?></th>
                     <th><?= sortHeader('Status', 'status', $sort, $order) ?></th>
                     <th><?= sortHeader('Country', 'country', $sort, $order) ?></th>
                     <th><?= sortHeader('Date', 'created_at', $sort, $order) ?></th>
@@ -521,7 +575,7 @@ function sortHeader(string $label, string $col, string $sort, string $order): st
                         </div>
                     </td>
                     <td><?= h($a['program']) ?></td>
-                    <td><?= h($a['department']) ?></td>
+                    <td><?= h($a['degree_program'] ?? '—') ?></td>
 <td>
     <?php 
         $statusRaw = $a['status'] ?? 'unknown';
@@ -620,7 +674,7 @@ function sortHeader(string $label, string $col, string $sort, string $order): st
                 <h4>Application</h4>
                 <div class="modal-grid">
                     <div class="modal-field"><label>Program</label><span id="m-program"></span></div>
-                    <div class="modal-field"><label>Department</label><span id="m-department"></span></div>
+                    <div class="modal-field"><label>Degree Program</label><span id="m-department"></span></div>
                     <div class="modal-field"><label>Mobility Type</label><span id="m-mobility"></span></div>
                     <div class="modal-field"><label>Institution</label><span id="m-institution"></span></div>
                     <div class="modal-field"><label>Country</label><span id="m-country"></span></div>

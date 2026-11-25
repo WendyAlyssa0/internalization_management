@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/db.php';
-require_once __DIR__ . '/../config/roles.php';
+require_once __DIR__ . '/role_helpers.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -34,7 +34,9 @@ if (!hash_equals($_SESSION['csrf_token'] ?? '', (string)$sent)) {
 
 /* INPUT */
 $id = (int)($_POST['id'] ?? 0);
-if ($id <= 0) {
+$source = (string)($_POST['source'] ?? 'document');
+$table = $source === 'applicant' ? 'user_documents' : ($source === 'document' ? 'documents' : '');
+if ($id <= 0 || $table === '') {
     echo json_encode(['success' => false, 'message' => 'Missing ID']);
     exit;
 }
@@ -42,7 +44,7 @@ if ($id <= 0) {
 $pdo = db();
 
 /* EXISTENCE */
-$check = $pdo->prepare("SELECT status FROM documents WHERE id = ?");
+$check = $pdo->prepare("SELECT status FROM $table WHERE id = ?");
 $check->execute([$id]);
 if ($check->fetchColumn() === false) {
     echo json_encode(['success' => false, 'message' => 'Document not found']);
@@ -51,7 +53,7 @@ if ($check->fetchColumn() === false) {
 
 /* UPDATE */
 try {
-    $stmt = $pdo->prepare("UPDATE documents SET status = 'approved' WHERE id = ?");
+    $stmt = $pdo->prepare("UPDATE $table SET status = 'approved' WHERE id = ?");
     $stmt->execute([$id]);
 
     echo json_encode(['success' => true, 'message' => 'Document approved']);

@@ -101,13 +101,21 @@ $totalCountries = 0;
 if ($page === 'browse') {
     try {
         $stmt = $pdo->prepare("
-            SELECT p.id, p.program_name, p.program_type, p.description, p.start_date, p.end_date,
-                   p.status, p.partner_id, p.country_id, c.country_name, pr.institution_name
+            SELECT p.id, p.program_name, p.program_type, p.program_types, p.description, p.start_date, p.end_date,
+                   p.application_start_date, p.application_end_date, p.eligible_participant_types,
+                   p.eligible_account_type, p.status, p.partner_id, p.country_id, c.country_name, pr.institution_name
             FROM programs p
             LEFT JOIN countries c ON p.country_id = c.id
             LEFT JOIN partners pr ON p.partner_id = pr.id
             WHERE p.status = 'Active'
-              AND p.eligible_account_type = 'Student'
+              AND COALESCE(p.mobility_direction, 'outbound') = 'outbound'
+              AND (p.application_start_date IS NULL OR p.application_start_date <= CURDATE())
+              AND (p.application_end_date IS NULL OR p.application_end_date >= CURDATE())
+              AND (
+                    (JSON_VALID(p.eligible_participant_types) = 1 AND JSON_CONTAINS(p.eligible_participant_types, '\"student\"'))
+                    OR (JSON_VALID(p.eligible_participant_types) = 0 AND LOWER(p.eligible_account_type) IN ('student', 'both'))
+                    OR p.eligible_participant_types IS NULL
+              )
             ORDER BY p.id DESC
         ");
         $stmt->execute();

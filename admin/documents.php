@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/roles.php';
+require_once __DIR__ . '/role_helpers.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -43,6 +44,7 @@ if (!function_exists('h')) {
 $search = trim((string)($_GET['search'] ?? ''));
 $type   = trim((string)($_GET['type'] ?? ''));
 $view   = (string)($_GET['view'] ?? 'all');
+$applicationId = max(0, (int)($_GET['application_id'] ?? 0));
 
 /* =========================
    PAGINATION
@@ -84,6 +86,10 @@ if ($type !== '') {
 if ($view === 'new') {
     $whereA .= " AND LOWER(d.status) = 'pending'";
 }
+if ($applicationId > 0) {
+    $whereA .= " AND d.application_id = :application_id";
+    $paramsA[':application_id'] = $applicationId;
+}
 
 $docsFromDocuments = [];
 $stmtA = $pdo->prepare("
@@ -109,7 +115,7 @@ foreach ($stmtA->fetchAll(PDO::FETCH_ASSOC) as $row) {
 
 /* =========================================================
    SOURCE B: user_documents table (applicant requirement uploads)
-   These have no review status, so they are shown in the "all" view only.
+   Applicant requirement uploads are reviewed from this same screen.
 ========================================================= */
 $docsFromApplicants = [];
 
@@ -141,6 +147,13 @@ if ($view !== 'new') {
             $whereB .= " AND $extExpr = LOWER(:type)";
             $paramsB[':type'] = $type;
         }
+        if ($view === 'new') {
+            $whereB .= " AND LOWER(COALESCE(ud.status, 'pending')) = 'pending'";
+        }
+        if ($applicationId > 0) {
+            $whereB .= " AND ud.application_id = :application_id";
+            $paramsB[':application_id'] = $applicationId;
+        }
     }
 
     try {
@@ -150,7 +163,7 @@ if ($view !== 'new') {
                 CONCAT_WS(' - ', r.requirement_name, p.program_name) AS title,
                 $extExpr AS file_type,
                 ud.file_path,
-                'uploaded' AS status,
+                COALESCE(ud.status, 'pending') AS status,
                 ud.uploaded_at AS created_at,
                 COALESCE(CONCAT(u.first_name,' ',u.last_name), 'Unknown') AS uploader
             FROM user_documents ud
@@ -189,6 +202,24 @@ $documents  = array_slice($allDocs, $offset, $limit);
 ========================= */
 $canReview = isApprover() || isAdmin() || isSuperAdmin();
 $canDelete = canManageSystem() || isAdmin() || isSuperAdmin();
+$applicationReviews = $pdo->query("
+    SELECT a.id, a.applicant_id, a.program_id, a.status,
+           CONCAT_WS(' ', u.first_name, u.last_name) AS applicant,
+           p.program_name,
+           COUNT(DISTINCT CASE WHEN pr.is_required = 1 THEN pr.requirement_id END) AS required_count,
+           COUNT(DISTINCT CASE WHEN pr.is_required = 1 AND ud.id IS NOT NULL THEN pr.requirement_id END) AS uploaded_count
+    FROM applications a
+    LEFT JOIN users u ON u.id = a.applicant_id
+    LEFT JOIN programs p ON p.id = a.program_id
+    LEFT JOIN program_requirements pr ON pr.program_id = a.program_id
+    LEFT JOIN user_documents ud
+        ON ud.application_id = a.id
+       AND ud.user_id = a.applicant_id
+       AND ud.requirement_id = pr.requirement_id
+    GROUP BY a.id, a.applicant_id, a.program_id, a.status, u.first_name, u.last_name, p.program_name
+    ORDER BY a.created_at DESC
+    LIMIT 100
+")->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <link rel="stylesheet" href="../asset/css/applications.css">
@@ -198,6 +229,28 @@ $canDelete = canManageSystem() || isAdmin() || isSuperAdmin();
     <h2>Document Management</h2>
     <p>Handles all uploaded documents, including applicant requirement uploads.</p>
 </div>
+
+<div class="table-section" style="margin-bottom:20px;">
+    <h3 style="padding:16px 20px;margin:0;">Application requirement review</h3>
+    <table class="table-card">
+        <thead><tr><th>Applicant</th><th>Program</th><th>Required uploads</th><th>Application</th><th></th></tr></thead>
+        <tbody>
+        <?php foreach ($applicationReviews as $review): ?>
+            <tr>
+                <td><?= h($review['applicant'] ?: 'Unknown applicant') ?> (#<?= (int)$review['id'] ?>)</td>
+                <td><?= h($review['program_name'] ?? '—') ?></td>
+                <td><?= (int)$review['uploaded_count'] ?> / <?= (int)$review['required_count'] ?> uploaded</td>
+                <td><?= h(ucwords(str_replace('_', ' ', (string)$review['status']))) ?></td>
+                <td><a href="?page=documents&application_id=<?= (int)$review['id'] ?>">Review documents</a></td>
+            </tr>
+        <?php endforeach; ?>
+        <?php if (!$applicationReviews): ?><tr><td colspan="5">No applications to review.</td></tr><?php endif; ?>
+        </tbody>
+    </table>
+</div>
+<?php if ($applicationId > 0): ?>
+    <p style="margin:0 0 12px;"><a href="?page=documents">Show documents from all applications</a></p>
+<?php endif; ?>
 
 <!-- SEARCH -->
 <div class="toolbar">
@@ -210,6 +263,7 @@ $canDelete = canManageSystem() || isAdmin() || isSuperAdmin();
 <!-- FILTER -->
 <form method="GET" class="filter-bar">
     <input type="hidden" name="view" value="<?= h($view) ?>">
+    <?php if ($applicationId > 0): ?><input type="hidden" name="application_id" value="<?= $applicationId ?>"><?php endif; ?>
 
     <select name="type">
         <option value="">All Types</option>
@@ -241,11 +295,13 @@ $canDelete = canManageSystem() || isAdmin() || isSuperAdmin();
         <?php
             $isApplicantUpload = ($d['source'] === 'applicant');
             $statusKey = strtolower((string)$d['status']);
-            $safePath  = (string)$d['file_path'];
-            // Guard: only allow safe relative paths
-            $linkable = (bool)preg_match('#^[A-Za-z0-9_./-]+$#', $safePath);
-            // Applicant uploads are stored relative to the project root; this page lives in /admin
-            $href = $isApplicantUpload ? '../' . ltrim($safePath, '/') : $safePath;
+            $safePath  = ltrim((string)$d['file_path'], '/');
+            $uploadsRoot = realpath(dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads');
+            $absolutePath = realpath(dirname(__DIR__) . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $safePath));
+            $linkable = $uploadsRoot && $absolutePath &&
+                str_starts_with($absolutePath, $uploadsRoot . DIRECTORY_SEPARATOR) &&
+                is_file($absolutePath);
+            $href = '../' . $safePath;
         ?>
 <tr>
     <td><?= h($d['uploader']) ?></td>
@@ -273,22 +329,19 @@ $canDelete = canManageSystem() || isAdmin() || isSuperAdmin();
             </a>
         <?php endif; ?>
 
-        <?php if (!$isApplicantUpload): ?>
-            <?php if ($canReview): ?>
-                <button class="btn-approve" onclick="confirmAction('approve', <?= (int)$d['id'] ?>)">
+        <?php if ($canReview): ?>
+                <button class="btn-approve" onclick="confirmAction('approve', <?= (int)$d['id'] ?>, '<?= h($d['source']) ?>')">
                     <i class="fa fa-check"></i>
                 </button>
 
-                <button class="btn-reject" onclick="confirmAction('reject', <?= (int)$d['id'] ?>)">
+                <button class="btn-reject" onclick="confirmAction('reject', <?= (int)$d['id'] ?>, '<?= h($d['source']) ?>')">
                     <i class="fa fa-close"></i>
                 </button>
-            <?php endif; ?>
-
-            <?php if ($canDelete): ?>
-                <button class="btn-delete" onclick="confirmAction('delete', <?= (int)$d['id'] ?>)">
+        <?php endif; ?>
+        <?php if ($canDelete): ?>
+                <button class="btn-delete" onclick="confirmAction('delete', <?= (int)$d['id'] ?>, '<?= h($d['source']) ?>')">
                     <i class="fa fa-trash"></i>
                 </button>
-            <?php endif; ?>
         <?php endif; ?>
 
     </td>
@@ -373,6 +426,7 @@ const DOCS_CSRF = <?= json_encode($csrfToken) ?>;
 
 let pendingAction = null;
 let pendingId = null;
+let pendingSource = 'document';
 
 const ACTION_CONFIG = {
     approve: {
@@ -413,9 +467,10 @@ const ACTION_CONFIG = {
     }
 };
 
-function confirmAction(action, id) {
+function confirmAction(action, id, source = 'document') {
     pendingAction = action;
     pendingId = id;
+    pendingSource = source;
     const c = ACTION_CONFIG[action];
 
     document.getElementById('confirm-title').textContent   = c.title;
@@ -454,6 +509,7 @@ function executeAction() {
     const formData = new FormData();
     formData.append('id', pendingId);
     formData.append('csrf_token', DOCS_CSRF);
+    formData.append('source', pendingSource);
 
     fetch(ACTION_CONFIG[pendingAction].endpoint, { method: 'POST', body: formData })
         .then(r => r.json())

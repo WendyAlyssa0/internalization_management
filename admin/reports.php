@@ -83,6 +83,37 @@ $totalApplications = countRows($pdo, "SELECT COUNT(*) FROM applications");
 $pendingPct  = $totalApplications > 0 ? round($pending  / $totalApplications * 100) : 0;
 $approvedPct = $totalApplications > 0 ? round($approved / $totalApplications * 100) : 0;
 $rejectedPct = $totalApplications > 0 ? round($rejected / $totalApplications * 100) : 0;
+$totalPartners = countRows($pdo, "SELECT COUNT(*) FROM partners");
+$outboundStudentCount = countRows($pdo, "
+    SELECT COUNT(*) FROM applications a
+    LEFT JOIN users u ON u.id = a.applicant_id
+    WHERE LOWER(a.mobility_type) LIKE 'outbound%'
+      AND LOWER(COALESCE(NULLIF(u.account_type, ''), u.user_role, '')) IN ('student', 'applicant')
+");
+$outboundFacultyCount = countRows($pdo, "
+    SELECT COUNT(*) FROM applications a
+    LEFT JOIN users u ON u.id = a.applicant_id
+    WHERE LOWER(a.mobility_type) LIKE 'outbound%'
+      AND LOWER(COALESCE(NULLIF(u.account_type, ''), u.user_role, '')) = 'faculty'
+");
+$inboundTypeCounts = ['student' => 0, 'faculty' => 0];
+$inboundCountsStmt = $pdo->query("
+    SELECT participant_type, COUNT(*) AS total
+    FROM inbound_participants
+    GROUP BY participant_type
+");
+foreach ($inboundCountsStmt->fetchAll(PDO::FETCH_ASSOC) as $inboundRow) {
+    $type = strtolower((string)$inboundRow['participant_type']);
+    if (isset($inboundTypeCounts[$type])) {
+        $inboundTypeCounts[$type] = (int)$inboundRow['total'];
+    }
+}
+$programTypeBreakdown = $pdo->query("
+    SELECT COALESCE(NULLIF(program_type, ''), 'Uncategorized') AS program_type, COUNT(*) AS total
+    FROM programs
+    GROUP BY COALESCE(NULLIF(program_type, ''), 'Uncategorized')
+    ORDER BY program_type
+")->fetchAll(PDO::FETCH_ASSOC);
 
 /* =========================
    RECENT APPLICATIONS
@@ -117,32 +148,42 @@ $firstName = $_SESSION['first_name'] ?? 'Administrator';
         </a>
     </div>
 
-    <!-- ============= ROW 1: KPI CARDS ============= -->
-    <div class="stat-grid">
+    <!-- ============= SYSTEM OVERVIEW ============= -->
+    <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
         <div class="stat-card">
-            <div class="stat-label"><i class="fa-solid fa-users"></i> Total Applicants</div>
-            <div class="stat-value"><?= number_format($totalApplicants) ?></div>
-            <div class="stat-delta up"><i class="fa-solid fa-user-plus"></i> <span>Registered accounts</span></div>
+            <div class="stat-label"><i class="fa-solid fa-building"></i> Partners</div>
+            <div class="stat-value"><?= number_format($totalPartners) ?></div>
+            <div class="stat-delta"><span>Partner institutions</span></div>
+        </div>
+        <button type="button" class="stat-card" id="programBreakdownButton" aria-haspopup="dialog">
+            <span class="stat-label"><i class="fa-solid fa-graduation-cap"></i> Programs</span>
+            <span class="stat-value"><?= number_format($totalPrograms) ?></span>
+            <span class="stat-delta"><span><?= number_format($activePrograms) ?> active · view by type</span></span>
+        </button>
+        <div class="stat-card">
+            <div class="stat-label"><i class="fa-solid fa-plane-departure"></i> Outbound Students</div>
+            <div class="stat-value"><?= number_format($outboundStudentCount) ?></div>
+            <div class="stat-delta"><span>Applications</span></div>
         </div>
         <div class="stat-card">
-            <div class="stat-label"><i class="fa-solid fa-graduation-cap"></i> Active Programs</div>
-            <div class="stat-value"><?= number_format($activePrograms) ?></div>
-            <div class="stat-delta"><span class="delta-label"><?= $totalPrograms ?> total · <?= $upcomingPrograms ?> upcoming</span></div>
+            <div class="stat-label"><i class="fa-solid fa-plane-arrival"></i> Inbound Students</div>
+            <div class="stat-value"><?= number_format($inboundTypeCounts['student']) ?></div>
+            <div class="stat-delta"><span>Admin-entered participants</span></div>
         </div>
         <div class="stat-card">
-            <div class="stat-label"><i class="fa-solid fa-clock"></i> Pending Applications</div>
-            <div class="stat-value pending"><?= number_format($pending) ?></div>
-            <div class="stat-delta"><span class="delta-label"><?= $pendingPct ?>% of all applications</span></div>
+            <div class="stat-label"><i class="fa-solid fa-user-tie"></i> Outbound Faculty</div>
+            <div class="stat-value"><?= number_format($outboundFacultyCount) ?></div>
+            <div class="stat-delta"><span>Applications</span></div>
         </div>
         <div class="stat-card">
-            <div class="stat-label"><i class="fa-solid fa-chart-line"></i> Approval Rate</div>
-            <div class="stat-value"><?= $approvalRate ?>%</div>
-            <div class="stat-delta up"><i class="fa-solid fa-circle-check"></i> <span><?= number_format($approved) ?> approved</span></div>
+            <div class="stat-label"><i class="fa-solid fa-user-group"></i> Inbound Faculty</div>
+            <div class="stat-value"><?= number_format($inboundTypeCounts['faculty']) ?></div>
+            <div class="stat-delta"><span>Admin-entered participants</span></div>
         </div>
     </div>
 
-    <!-- ============= ROW 2: CHARTS + SIDEBAR ============= -->
-    <div class="overview-grid">
+    <!-- ============= MOBILITY STATUS ============= -->
+    <div class="overview-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));">
         
         <!-- Line Chart -->
         <div class="panel linechart-panel">
@@ -158,7 +199,7 @@ $firstName = $_SESSION['first_name'] ?? 'Administrator';
         <!-- Donut Chart -->
         <div class="panel donutchart-panel">
             <div class="panel-header">
-                <span class="panel-title">Application Status</span>
+                <span class="panel-title">Mobility Status</span>
                 <a href="?page=applications" class="view-all-link">View all</a>
             </div>
             <div class="panel-body">
@@ -194,120 +235,10 @@ $firstName = $_SESSION['first_name'] ?? 'Administrator';
             </div>
         </div>
 
-        <!-- Side Column -->
-        <div class="side-col">
-            <div class="panel">
-                <div class="panel-header">
-                    <span class="panel-title">Quick Actions</span>
-                </div>
-                <div class="quick-actions-grid">
-                    <a class="quick-action" href="?page=programs">
-                        <span class="qa-icon material-symbols-outlined">add_circle</span>
-                        <span class="qa-text">
-                            <span class="qa-title">New Program</span>
-                            <span class="qa-sub">Create a mobility program</span>
-                        </span>
-                    </a>
-                    <a class="quick-action" href="?page=users">
-                        <span class="qa-icon material-symbols-outlined">person_add</span>
-                        <span class="qa-text">
-                            <span class="qa-title">Add User</span>
-                            <span class="qa-sub">Invite an administrator</span>
-                        </span>
-                    </a>
-                    <a class="quick-action" href="?page=announcements">
-                        <span class="qa-icon material-symbols-outlined">campaign</span>
-                        <span class="qa-text">
-                            <span class="qa-title">Announcement</span>
-                            <span class="qa-sub">Broadcast to applicants</span>
-                        </span>
-                    </a>
-                    <!-- Fixed link from ?page=reports to ?page=home -->
-                    <a class="quick-action" href="?page=home">
-                        <span class="qa-icon material-symbols-outlined">description</span>
-                        <span class="qa-text">
-                            <span class="qa-title">Reports</span>
-                            <span class="qa-sub">Export system data</span>
-                        </span>
-                    </a>
-                </div>
-            </div>
-            
-            <div class="panel">
-                <div class="panel-header">
-                    <span class="panel-title">Programs Overview</span>
-                </div>
-                <div class="panel-body" style="padding-top: 10px;">
-                     <ul class="deadline-list">
-                         <li><span class="deadline-name">Active Programs</span><span class="deadline-date"><?= $activePrograms ?></span></li>
-                         <li><span class="deadline-name">Upcoming Programs</span><span class="deadline-date"><?= $upcomingPrograms ?></span></li>
-                         <li><span class="deadline-name">Completed Programs</span><span class="deadline-date"><?= $completedPrograms ?></span></li>
-                     </ul>
-                </div>
-            </div>
-        </div>
-
     </div>
 
-    <!-- ============= ROW 3: RECENT APPS + SYSTEM ============= -->
+    <!-- ============= SYSTEM OVERVIEW + RECENT APPLICATIONS ============= -->
     <div class="bottom-grid">
-        <div class="panel">
-            <div class="panel-header">
-                <span class="panel-title">Recent Applications</span>
-                <a href="?page=applications" class="view-all-link">View all</a>
-            </div>
-            <div class="table-wrap">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Applicant</th>
-                            <th>Status</th>
-                            <th>Submitted</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    <?php if (!empty($recentApplications)): ?>
-                        <?php foreach ($recentApplications as $a): ?>
-                            <tr>
-                                <td>
-                                    <div class="applicant-cell">
-                                        <span class="applicant-name">
-                                            <?= h(trim(($a['first_name'] ?? '') . ' ' . ($a['last_name'] ?? '')) ?: 'Unknown') ?>
-                                        </span>
-                                        <span class="applicant-email"><?= h($a['email'] ?? '') ?></span>
-                                    </div>
-                                </td>
-                                <td>
-                                    <?php
-                                        // Replaced PHP 8 'match' with switch for backward compatibility
-                                        $status = strtolower($a['status'] ?? 'submitted');
-                                        $badgeClass = 'neutral';
-                                        $label = ucfirst($status);
-                                        
-                                        switch($status) {
-                                            case 'approved':
-                                                $badgeClass = 'success'; $label = 'Approved'; break;
-                                            case 'rejected':
-                                                $badgeClass = 'danger'; $label = 'Rejected'; break;
-                                            case 'under_review':
-                                                $badgeClass = 'info'; $label = 'Under Review'; break;
-                                            case 'submitted':
-                                                $badgeClass = 'warning'; $label = 'Submitted'; break;
-                                        }
-                                    ?>
-                                    <span class="badge <?= $badgeClass ?>"><?= h($label) ?></span>
-                                </td>
-                                <td><?= h(date('M j, Y', strtotime($a['created_at']))) ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php else: ?>
-                        <tr><td colspan="3" class="text-center" style="padding:20px;">No applications yet.</td></tr>
-                    <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
         <div class="panel">
             <div class="panel-header">
                 <span class="panel-title">System Overview</span>
@@ -345,12 +276,76 @@ $firstName = $_SESSION['first_name'] ?? 'Administrator';
                 </div>
             </div>
         </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <span class="panel-title">Recent Applications</span>
+                <a href="?page=applications" class="view-all-link">View all</a>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead><tr><th>Applicant</th><th>Status</th><th>Submitted</th></tr></thead>
+                    <tbody>
+                    <?php if (!empty($recentApplications)): ?>
+                        <?php foreach ($recentApplications as $a): ?>
+                            <?php
+                                $status = strtolower((string)($a['status'] ?? 'submitted'));
+                                $badgeClass = $status === 'approved' ? 'success' : ($status === 'rejected' ? 'danger' : ($status === 'under_review' ? 'info' : 'warning'));
+                            ?>
+                            <tr>
+                                <td>
+                                    <div class="applicant-cell">
+                                        <span class="applicant-name"><?= h(trim(($a['first_name'] ?? '') . ' ' . ($a['last_name'] ?? '')) ?: 'Unknown') ?></span>
+                                        <span class="applicant-email"><?= h($a['email'] ?? '') ?></span>
+                                    </div>
+                                </td>
+                                <td><span class="badge <?= $badgeClass ?>"><?= h(ucwords(str_replace('_', ' ', $status))) ?></span></td>
+                                <td><?= h(date('M j, Y', strtotime($a['created_at']))) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <tr><td colspan="3" class="text-center" style="padding:20px;">No applications yet.</td></tr>
+                    <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
 </div>
 
+<div id="programTypeModal" role="dialog" aria-modal="true" aria-labelledby="programTypeTitle" hidden style="position:fixed;inset:0;z-index:2000;background:rgba(15,23,42,.45);align-items:center;justify-content:center;padding:20px;">
+    <div style="background:#fff;border-radius:12px;padding:24px;width:min(100%,480px);max-height:80vh;overflow:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+            <h2 id="programTypeTitle">Programs by Type</h2>
+            <button type="button" id="closeProgramTypeModal" aria-label="Close">Close</button>
+        </div>
+        <ul>
+            <?php foreach ($programTypeBreakdown as $breakdown): ?>
+                <li><?= h($breakdown['program_type']) ?> — <?= number_format((int)$breakdown['total']) ?></li>
+            <?php endforeach; ?>
+            <?php if (!$programTypeBreakdown): ?><li>No programs recorded.</li><?php endif; ?>
+        </ul>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
+    const programTypeModal = document.getElementById('programTypeModal');
+    document.getElementById('programBreakdownButton').addEventListener('click', () => {
+        programTypeModal.hidden = false;
+        programTypeModal.style.display = 'flex';
+    });
+    document.getElementById('closeProgramTypeModal').addEventListener('click', () => {
+        programTypeModal.hidden = true;
+        programTypeModal.style.display = 'none';
+    });
+    programTypeModal.addEventListener('click', event => {
+        if (event.target === programTypeModal) {
+            programTypeModal.hidden = true;
+            programTypeModal.style.display = 'none';
+        }
+    });
     Chart.defaults.font.family = "'Oswald', sans-serif";
     Chart.defaults.color = '#64748b';
 

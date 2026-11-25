@@ -7,6 +7,7 @@ if (session_status() === PHP_SESSION_NONE) {
 
 // Ensure roles helper is loaded
 require_once __DIR__ . '/../config/roles.php';
+require_once __DIR__ . '/role_helpers.php';
 
 $currentRole = strtolower(trim((string)($_SESSION['user_role'] ?? '')));
 $currentRole = str_replace('_', ' ', $currentRole);
@@ -33,7 +34,7 @@ $menus = [];
 // 1. Program Management
 if (canManagePrograms()) {
     $menus['program_management'] = [
-        'label' => 'Program Management', 'icon' => 'fa-solid fa-graduation-cap', 'group' => 'Management',
+        'label' => 'Program Management', 'icon' => 'fa-solid fa-graduation-cap', 'group' => 'Program & Location',
         'items' => [
             'programs'         => ['icon' => 'fa-solid fa-book', 'label' => 'Programs'],
             'partners'         => ['icon' => 'fa-solid fa-building', 'label' => 'Partner Institutions'],
@@ -42,11 +43,19 @@ if (canManagePrograms()) {
         ],
     ];
 }
+if (canManageSystem()) {
+    $menus['degree_programs'] = [
+        'label' => 'Degree Programs', 'icon' => 'fa-solid fa-list', 'group' => 'Program & Location',
+        'items' => [
+            'degree_programs' => ['icon' => 'fa-solid fa-list', 'label' => 'Degree Program Lists'],
+        ],
+    ];
+}
 
 // 2. Location Management
 if (canManagePartners()) {
     $menus['location_management'] = [
-        'label' => 'Location Management', 'icon' => 'fa-solid fa-location-dot', 'group' => 'Management',
+        'label' => 'Location Management', 'icon' => 'fa-solid fa-location-dot', 'group' => 'Program & Location',
         'items' => [
             'countries_addresses' => ['icon' => 'fa-solid fa-earth-americas', 'label' => 'Country & Address'],
         ],
@@ -56,7 +65,7 @@ if (canManagePartners()) {
 // 3. Application Management
 if (canManageActivities() || isApprover() || isAdmin()) {
     $menus['application_management'] = [
-        'label' => 'Application Management', 'icon' => 'fa-solid fa-file-pen', 'group' => 'Management',
+        'label' => 'Application Management', 'icon' => 'fa-solid fa-file-pen', 'group' => 'Applications',
         'items' => [
             'applications'        => ['icon' => 'fa-solid fa-file-lines', 'label' => 'Applications'],
             'documents'           => ['icon' => 'fa-solid fa-folder-open', 'label' => 'Submitted Documents'],
@@ -69,7 +78,7 @@ if (canManageActivities() || isApprover() || isAdmin()) {
 // 4. Student Mobility
 if (canManageActivities() || isAdmin()) {
     $menus['student_mobility'] = [
-        'label' => 'Student Mobility', 'icon' => 'fa-solid fa-plane-departure', 'group' => 'Management',
+        'label' => 'Student Mobility', 'icon' => 'fa-solid fa-plane-departure', 'group' => 'Mobility',
         'items' => [
             'inbound_students'  => ['icon' => 'fa-solid fa-user-graduate', 'label' => 'Inbound Students'],
             'outbound_students' => ['icon' => 'fa-solid fa-user-tie', 'label' => 'Outbound Students'],
@@ -83,7 +92,7 @@ if (canManageActivities() || isAdmin()) {
 
 // 5. Communication
 $menus['communication'] = [
-    'label' => 'Communication', 'icon' => 'fa-solid fa-comments', 'group' => 'Management',
+    'label' => 'Communication', 'icon' => 'fa-solid fa-comments', 'group' => 'Communication',
     'items' => [
         'notifications' => ['icon' => 'fa-solid fa-bell', 'label' => 'Notifications'],
         'announcements' => ['icon' => 'fa-solid fa-bullhorn', 'label' => 'Announcements'],
@@ -91,13 +100,15 @@ $menus['communication'] = [
 ];
 
 // 6. Administration (Strict Admin/Super Admin Only)
-if (canManageSystem()) {
+if (canManageSystem() || adminCurrentRole() === 'campus coordinator') {
     $menus['users'] = [
         'label' => 'Users', 'icon' => 'fa-solid fa-user-gear', 'group' => 'Administration',
         'items' => [
             'users' => ['icon' => 'fa-solid fa-users', 'label' => 'User Accounts'],
         ],
     ];
+}
+if (canManageSystem()) {
     $menus['system_settings'] = [
         'label' => 'System & Settings', 'icon' => 'fa-solid fa-gear', 'group' => 'Administration',
         'items' => [

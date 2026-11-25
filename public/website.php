@@ -14,9 +14,13 @@ try {
             p.id,
             p.program_name,
             p.program_type,
+            p.program_types,
+            p.eligible_participant_types,
             p.description,
             p.start_date,
             p.end_date,
+            p.application_start_date,
+            p.application_end_date,
             p.status,
             p.partner_id,
             p.country_id,
@@ -29,6 +33,9 @@ try {
         LEFT JOIN partners pr
             ON p.partner_id = pr.id
         WHERE p.status IN ('Active', 'Upcoming')
+          AND COALESCE(p.mobility_direction, 'outbound') = 'outbound'
+          AND (p.application_start_date IS NULL OR p.application_start_date <= CURDATE())
+          AND (p.application_end_date IS NULL OR p.application_end_date >= CURDATE())
         ORDER BY p.id DESC
     ");
 
@@ -37,11 +44,16 @@ try {
 
     // Split into two buckets
     foreach ($allPrograms as $p) {
-        $type = strtolower(trim($p['eligible_account_type'] ?? ''));
-        if ($type === 'faculty') {
+        $eligibleTypes = json_decode((string)($p['eligible_participant_types'] ?? ''), true);
+        if (!is_array($eligibleTypes)) {
+            $legacyType = strtolower(trim((string)($p['eligible_account_type'] ?? '')));
+            $eligibleTypes = $legacyType === 'both' ? ['student', 'faculty'] : [$legacyType];
+        }
+        $eligibleTypes = array_map('strtolower', $eligibleTypes);
+        if (in_array('faculty', $eligibleTypes, true)) {
             $facultyPrograms[] = $p;
-        } else {
-            // 'student' or anything else defaults to student
+        }
+        if (in_array('student', $eligibleTypes, true)) {
             $studentPrograms[] = $p;
         }
     }
@@ -84,6 +96,23 @@ foreach (array_merge($studentPrograms, $facultyPrograms) as $p) {
     if (!empty($p['institution_name'])) $allInstitutions[$p['institution_name']] = true;
 }
 $totalInstitutions = count($allInstitutions);
+
+$announcements = [];
+$announcementLoadError = null;
+try {
+    $announcements = $pdo->query("
+        SELECT title, announcement, publish_date, attachment_path
+        FROM announcements
+        WHERE status IN ('ongoing', 'Published')
+          AND publish_date <= CURDATE()
+          AND (expiry_date IS NULL OR expiry_date >= CURDATE())
+        ORDER BY publish_date DESC
+        LIMIT 5
+    ")->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $ex) {
+    error_log('public announcements query failed: ' . $ex->getMessage());
+    $announcementLoadError = 'Announcements are temporarily unavailable.';
+}
 
 // Requirements per audience
 $studentRequirements = [
@@ -1332,6 +1361,7 @@ nav:hover::after { width: 60%; }
       <li><a href="#studentPrograms" class="nav-link">Student Programs</a></li>
       <li><a href="#facultyPrograms" class="nav-link">Faculty Programs</a></li>
       <li><a href="#institutionsGrid" class="nav-link">Partner Institutions</a></li>
+      <li><a href="#announcements" class="nav-link">Announcements</a></li>
       <li><a href="#how-section" class="nav-link">How It Works</a></li>
     </ul>
 
@@ -1412,6 +1442,34 @@ nav:hover::after { width: 60%; }
       </div>
     </div>
   </div>
+</section>
+
+<section id="announcements" style="max-width:1200px;margin:0 auto;padding:48px 24px;">
+  <div style="margin-bottom:20px;">
+    <p style="color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.08em;">Latest updates</p>
+    <h2 style="font-size:2rem;color:#0b1a30;">Announcements</h2>
+  </div>
+  <?php if ($announcementLoadError): ?>
+    <p role="status"><?= htmlspecialchars($announcementLoadError, ENT_QUOTES, 'UTF-8') ?></p>
+  <?php elseif (!$announcements): ?>
+    <p style="color:#64748b;">There are no current announcements.</p>
+  <?php else: ?>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;">
+      <?php foreach ($announcements as $announcement): ?>
+        <article style="padding:20px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 4px 12px rgba(15,23,42,.04);">
+          <h3 style="margin:0 0 8px;color:#0b1a30;"><?= htmlspecialchars($announcement['title'], ENT_QUOTES, 'UTF-8') ?></h3>
+          <time style="display:block;margin-bottom:12px;color:#64748b;font-size:.875rem;" datetime="<?= htmlspecialchars($announcement['publish_date'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars(date('M d, Y', strtotime($announcement['publish_date'])), ENT_QUOTES, 'UTF-8') ?></time>
+          <p style="white-space:pre-line;color:#334155;"><?= htmlspecialchars($announcement['announcement'], ENT_QUOTES, 'UTF-8') ?></p>
+          <?php
+            $attachmentPath = ltrim((string)($announcement['attachment_path'] ?? ''), '/\\');
+            if (strpos($attachmentPath, 'uploads/announcements/') === 0 && strpos($attachmentPath, '..') === false):
+          ?>
+            <a href="../<?= htmlspecialchars($attachmentPath, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:12px;color:#1c3d6e;font-weight:600;">View attachment</a>
+          <?php endif; ?>
+        </article>
+      <?php endforeach; ?>
+    </div>
+  <?php endif; ?>
 </section>
 
 <!-- PARTNER INSTITUTIONS SHOWCASE -->

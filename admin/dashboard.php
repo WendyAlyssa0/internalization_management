@@ -1,7 +1,7 @@
-<?php
-declare(strict_types=1);
+<?php ob_start();
 
 require_once __DIR__ . '/../config/auth_middleware.php';
+require_once __DIR__ . '/role_helpers.php';
 
 /*
  * Use requireLogin() instead of requireAdmin() so that
@@ -24,7 +24,7 @@ $validPages = [
     'home',
 
     // Master Data
-    'countries_addresses', 'partners', 'agreement_types', 'program_category',
+    'countries_addresses', 'partners', 'agreement_types', 'program_category', 'degree_programs',
 
     // Program Management
     'programs', 'requirements', 'forms', 'program_requirements',
@@ -52,7 +52,7 @@ if (!in_array($page, $validPages, true)) {
    POST HANDLERS (AJAX)
 ========================= */
 $ajaxPages = [
-    'countries_addresses', 'program_category', 'agreement_types',
+    'countries_addresses', 'program_category', 'agreement_types', 'degree_programs',
     'partners', 'programs', 'requirements', 'forms', 'users',
     'program_requirements',
 ];
@@ -122,6 +122,7 @@ switch ($page) {
     case 'partners':             require __DIR__ . '/partners.php'; break;
     case 'agreement_types':      require __DIR__ . '/agreement_types.php'; break;
     case 'program_category':     require __DIR__ . '/program_category.php'; break;
+    case 'degree_programs':      require __DIR__ . '/degree_programs.php'; break;
     case 'programs':             require __DIR__ . '/programs.php'; break;
     case 'requirements':         require __DIR__ . '/requirements.php'; break;
     case 'forms':                require __DIR__ . '/forms.php'; break;

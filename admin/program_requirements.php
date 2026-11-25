@@ -62,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
         exit();
     }
 
-    $requirementStmt = $pdo->prepare("SELECT requirement_file FROM program_requirements WHERE id = ?");
+    $requirementStmt = $pdo->prepare("SELECT template_path FROM program_requirements WHERE id = ?");
     $requirementStmt->execute([$programRequirementId]);
     $oldFilePath = $requirementStmt->fetchColumn();
 
@@ -101,7 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
     }
 
     try {
-        $updateStmt = $pdo->prepare("UPDATE program_requirements SET requirement_file = ? WHERE id = ?");
+        $updateStmt = $pdo->prepare("UPDATE program_requirements SET template_path = ? WHERE id = ?");
         $updateStmt->execute([$relativePath, $programRequirementId]);
     } catch (PDOException $e) {
         unlink($destination);
@@ -134,23 +134,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
     $program_id        = (int)($_POST['program_id'] ?? 0);
     $requirement_id    = (int)($_POST['requirement_id'] ?? 0);
+    $applicantType     = strtolower(trim((string)($_POST['applicant_type'] ?? '')));
     $is_required       = isset($_POST['is_required']) ? 1 : 0;
 
-    if (!$program_id || !$requirement_id) {
-        echo json_encode(['ok' => false, 'message' => 'Program and Requirement are required.']);
+    if (!$program_id || !$requirement_id || !in_array($applicantType, ['student', 'faculty', 'non-teaching'], true)) {
+        echo json_encode(['ok' => false, 'message' => 'Program, requirement, and a valid applicant type are required.']);
         exit();
     }
 
     try {
-        $check = $pdo->prepare("SELECT id FROM program_requirements WHERE program_id = ? AND requirement_id = ?");
-        $check->execute([$program_id, $requirement_id]);
+        $check = $pdo->prepare("SELECT id FROM program_requirements WHERE program_id = ? AND requirement_id = ? AND applicant_type = ?");
+        $check->execute([$program_id, $requirement_id, $applicantType]);
         if ($check->fetch()) {
             echo json_encode(['ok' => false, 'message' => 'This requirement is already assigned to this program.']);
             exit();
         }
 
-        $stmt = $pdo->prepare("INSERT INTO program_requirements (program_id, requirement_id, is_required) VALUES (?, ?, ?)");
-        $stmt->execute([$program_id, $requirement_id, $is_required]);
+        $stmt = $pdo->prepare("INSERT INTO program_requirements (program_id, requirement_id, applicant_type, is_required) VALUES (?, ?, ?, ?)");
+        $stmt->execute([$program_id, $requirement_id, $applicantType, $is_required]);
 
         echo json_encode(['ok' => true, 'message' => 'Requirement assigned successfully.']);
     } catch (PDOException $e) {
@@ -168,7 +169,7 @@ $totalCount = (int)$pdo->query("SELECT COUNT(*) FROM program_requirements")->fet
 $totalPages = max(1, ceil($totalCount / $limit));
 
 $stmt = $pdo->prepare("
-    SELECT pr.id, p.program_name, r.requirement_name, pr.is_required, pr.requirement_file, pr.created_at
+    SELECT pr.id, p.program_name, r.requirement_name, pr.applicant_type, pr.is_required, pr.template_path, pr.created_at
     FROM program_requirements pr
     INNER JOIN programs p ON pr.program_id = p.id
     INNER JOIN requirements r ON pr.requirement_id = r.id
@@ -201,6 +202,7 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <thead>
                 <tr>
                     <th>Program</th>
+                    <th>Applicant Type</th>
                     <th>Requirement</th>
                     <th>Status</th>
                     <th>Applicant File</th>
@@ -213,6 +215,7 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <?php foreach ($requirements as $row): ?>
                     <tr>
                         <td style="font-weight:600;"><?= h($row['program_name']) ?></td>
+                        <td><?= h(ucwords($row['applicant_type'])) ?></td>
                         <td>
                             <div style="display:flex; align-items:center; gap:8px;">
                                 <i class="fa-solid fa-file-lines" style="color:#94a3b8;"></i>
@@ -225,8 +228,8 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 : '<span class="badge-secondary">Optional</span>' ?>
                         </td>
                         <td>
-                            <?php if (!empty($row['requirement_file'])): ?>
-                                <a class="requirement-file-link" href="../<?= h($row['requirement_file']) ?>" target="_blank" rel="noopener">
+                            <?php if (!empty($row['template_path'])): ?>
+                                <a class="requirement-file-link" href="../<?= h($row['template_path']) ?>" target="_blank" rel="noopener">
                                     <i class="fa-solid fa-eye"></i> View current file
                                 </a>
                             <?php endif; ?>
@@ -237,7 +240,7 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 <input class="requirement-file-input" type="file" name="requirement_file" accept=".pdf,.doc,.docx" required>
                                 <button type="submit" class="btn-file-upload">
                                     <i class="fa-solid fa-upload"></i>
-                                    <?= empty($row['requirement_file']) ? 'Upload file' : 'Replace file' ?>
+                                    <?= empty($row['template_path']) ? 'Upload template' : 'Replace template' ?>
                                 </button>
                                 <small>PDF, DOC, or DOCX (max 10 MB)</small>
                             </form>
@@ -247,7 +250,7 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <?php endforeach; ?>
                 <?php else: ?>
                     <tr class="empty-row">
-                        <td colspan="5">No requirements assigned to any program yet.</td>
+                        <td colspan="6">No requirements assigned to any program yet.</td>
                     </tr>
                 <?php endif; ?>
             </tbody>
@@ -318,6 +321,15 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <small style="color:#94a3b8; font-size:11px; margin-top:4px; display:block;">
                         Can't find it? <a href="?page=requirements" style="color:#2563eb;">Manage Master List</a>
                     </small>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label"><i class="fa fa-user-check"></i> Applicant Type *</label>
+                    <select name="applicant_type" class="form-input" required>
+                        <option value="student">Student</option>
+                        <option value="faculty">Faculty</option>
+                        <option value="non-teaching">Non-teaching</option>
+                    </select>
                 </div>
 
                 <div class="form-group">

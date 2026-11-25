@@ -45,7 +45,7 @@
     --shadow-sm:  0 1px 2px rgba(0,0,0,.05);
     --shadow-md:  0 4px 6px -1px rgba(0,0,0,.1), 0 2px 4px -1px rgba(0,0,0,.06);
     --shadow-lg:  0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -2px rgba(0,0,0,.05);
-    --shadow-modal: 0 25px 50px -12px rgba(0,0,0,.25);
+    --shadow-modal: 0 25px 50px -12px rgba(0,0,0,.4);
 
     --transition: 0.2s ease;
     --font-sans:  'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
@@ -56,7 +56,7 @@
 }
 
 /* -------------------------
-   PAGE LAYOUT
+   PAGE LAYOUT & HEADER
 ------------------------- */
 .content {
     padding: 32px 36px;
@@ -65,9 +65,6 @@
     color: var(--color-text-primary);
 }
 
-/* -------------------------
-   PAGE HEADER
-------------------------- */
 .page-header {
     margin-bottom: 28px;
 }
@@ -89,7 +86,7 @@
 }
 
 /* -------------------------
-   TOOLBAR
+   TOOLBAR (SEARCH & ADD)
 ------------------------- */
 .toolbar {
     display: flex;
@@ -99,7 +96,6 @@
     flex-wrap: wrap;
 }
 
-/* Search */
 .search-wrap {
     flex: 1;
     min-width: 240px;
@@ -140,7 +136,6 @@
     color: var(--color-text-muted);
 }
 
-/* Create button */
 .create-btn {
     display: flex;
     align-items: center;
@@ -171,7 +166,7 @@
 }
 
 /* -------------------------
-   TABLE (NEW REDESIGN)
+   TABLE
 ------------------------- */
 .table-card {
     background: var(--color-surface);
@@ -187,7 +182,6 @@
     font-size: 0.875rem;
 }
 
-/* Soft, light header instead of heavy navy */
 .table-card thead {
     background: #f8fafc;
     border-bottom: 1px solid var(--color-border);
@@ -223,20 +217,17 @@
     vertical-align: middle;
 }
 
-/* First column styling */
 .table-card tbody td:first-child {
     font-weight: 600;
     color: var(--color-text-primary);
 }
 
-/* Program name cell */
 .program-name {
     display: flex;
     align-items: center;
     gap: 12px;
 }
 
-/* Soft blue icon instead of dark navy */
 .program-icon {
     width: 38px;
     height: 38px;
@@ -326,7 +317,7 @@
 }
 
 /* -------------------------
-   STATUS BADGES
+   STATUS BADGES & ACTION BUTTONS
 ------------------------- */
 .status-badge {
     display: inline-flex;
@@ -378,9 +369,6 @@
     color: var(--color-error-text);
 }
 
-/* -------------------------
-   ACTION BUTTONS
-------------------------- */
 .action-btn {
     width: 34px;
     height: 34px;
@@ -396,7 +384,6 @@
     transition: all var(--transition);
 }
 
-/* Ghost buttons: only show color on hover */
 .edit-btn {
     color: var(--color-text-muted);
 }
@@ -415,24 +402,28 @@
     border-color: #fecdd3;
 }
 
-/* ... KEEP ALL YOUR MODAL, FORM, AND TOAST CSS FROM BEFORE BELOW THIS LINE ... */
-/* (The rest of the file is identical to your original setup for modals) */
+.duplicate-btn {
+    color: var(--color-text-muted);
+}
+.duplicate-btn:hover {
+    background: #f0fdf4;
+    color: #16a34a;
+    border-color: #bbf7d0;
+}
 
 /* -------------------------
-   MODALS
+   MODALS (Fixed scrolling & alignment)
 ------------------------- */
 .modal-overlay {
     display: none;
     position: fixed;
     inset: 0;
-    background: rgba(15,32,68,.45);
-    backdrop-filter: blur(3px);
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(4px);
     z-index: 1000;
-    
-    /* Center the modal */
     align-items: center; 
     justify-content: center;
-    padding: 20px;
+    padding: 24px;
     overflow-y: auto;
     animation: fadeIn 0.18s ease;
 }
@@ -451,15 +442,11 @@
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-modal);
     width: 100%;
-    max-width: 640px;
-    
-    /* THE CRITICAL FIX: Force the box to never exceed screen height */
-    max-height: calc(100vh - 40px); 
-    
-    /* Flex layout to pin header/footer */
+    max-width: 720px;
+    /* Force the box to never exceed screen height */
+    max-height: calc(100vh - 48px); 
     display: flex;
     flex-direction: column;
-    
     animation: slideUp 0.22s ease;
     overflow: hidden; /* Clips the body scroll */
 }
@@ -469,16 +456,23 @@
     to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+/* Make the form inside the modal a flex container so body scrolls */
+.modal-box > form {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
 .modal-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     padding: 20px 24px;
     border-bottom: 1px solid var(--color-border);
-    
-    /* Prevent header from shrinking */
     flex-shrink: 0; 
 }
+
 .modal-header-left {
     display: flex;
     align-items: center;
@@ -486,11 +480,11 @@
 }
 
 .modal-icon {
-    width: 44px;
-    height: 44px;
+    width: 40px;
+    height: 40px;
     border-radius: var(--radius-md);
-    background: var(--color-primary);
-    color: white;
+    background: #eff6ff;
+    color: var(--color-accent);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -499,10 +493,10 @@
 }
 
 .modal-header h3 {
-    font-size: 1.1rem;
+    font-size: 1.15rem;
     font-weight: 700;
     color: var(--color-text-primary);
-    margin: 0 0 1px;
+    margin: 0 0 2px;
 }
 
 .modal-subtitle {
@@ -531,42 +525,47 @@
     color: var(--color-error);
 }
 
-/* Modal body */
+/* Modal body scrolls! */
 .modal-body {
-    padding: 22px;
-    overflow-y: auto; /* This makes the body scrollable */
+    padding: 24px;
+    overflow-y: auto; 
+    overscroll-behavior: contain; /* Prevents scroll chaining to the page */
     
-    /* Critical Flex Fixes: 
-       flex: 1 allows it to fill space.
-       min-height: 0 is REQUIRED for overflow-y to work in a flex child */
-    flex: 1;
+    /* Critical Flex Fixes: */
+    flex: 1 1 auto;
     min-height: 0; 
 }
 
-/* Modal footer */
 .modal-footer {
-    padding: 16px 22px;
+    padding: 16px 24px;
     border-top: 1px solid var(--color-border);
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
-    background: #fafafa;
-    
-    /* Prevent footer from shrinking or disappearing */
+    gap: 10px;
+    background: #f8fafc;
     flex-shrink: 0; 
 }
 
 /* -------------------------
-   FORM ELEMENTS
+   FORM ELEMENTS INSIDE MODALS
 ------------------------- */
 .form-group {
     margin-bottom: 18px;
 }
 
+.form-group:last-child {
+    margin-bottom: 0;
+}
+
 .form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 14px;
+    gap: 16px;
+    margin-bottom: 18px;
+}
+
+.form-row .form-group {
+    margin-bottom: 0;
 }
 
 .form-label {
@@ -577,11 +576,6 @@
     font-weight: 600;
     color: var(--color-text-secondary);
     margin-bottom: 7px;
-}
-
-.form-label i {
-    font-size: 0.75rem;
-    color: var(--color-text-muted);
 }
 
 .form-group label:not(.form-label) {
@@ -599,62 +593,116 @@
     font-family: var(--font-sans);
     color: var(--color-text-primary);
     background: var(--color-surface);
-    border: 1px solid var(--color-border);
+    border: 1px solid #cbd5e1;
     border-radius: var(--radius-md);
     transition: border-color var(--transition), box-shadow var(--transition);
-    appearance: none;
-    -webkit-appearance: none;
 }
 
 .form-input:focus {
     outline: none;
     border-color: var(--color-border-focus);
-    box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+    box-shadow: 0 0 0 3px rgba(37,99,235,.15);
 }
 
-.form-input::placeholder {
-    color: var(--color-text-muted);
+.form-input:disabled {
+    background: #f1f5f9;
+    color: #94a3b8;
+    cursor: not-allowed;
 }
 
-/* Select styling */
-select.form-input {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 12px center;
-    padding-right: 36px;
-    cursor: pointer;
-}
-
-/* Date input */
-input[type="date"].form-input {
-    cursor: pointer;
-}
-
-/* Textarea */
 textarea.form-input {
     resize: vertical;
-    min-height: 85px;
+    min-height: 90px;
     line-height: 1.5;
 }
 
-/* Modal footer */
-.modal-footer {
-    padding: 16px 22px;
-    border-top: 1px solid var(--color-border);
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    flex-shrink: 0;
-    background: #fafafa;
+/* Multi-select styling */
+select[multiple].form-input {
+    min-height: 120px;
+    padding: 8px;
+    background-image: none;
 }
 
-/* -------------------------
-   MODAL BUTTONS
-------------------------- */
+select[multiple].form-input option {
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 2px;
+}
+
+select[multiple].form-input option:checked {
+    background: #dbeafe linear-gradient(0deg, #dbeafe, #dbeafe);
+    color: #1e40af;
+    font-weight: 500;
+}
+
+/* Fieldset (Checkboxes) */
+fieldset {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--color-bg);
+}
+
+fieldset label {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    margin: 0 !important;
+    font-weight: 500 !important;
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+}
+
+fieldset input[type="checkbox"] {
+    accent-color: var(--color-accent);
+    width: 16px;
+    height: 16px;
+}
+
+/* Hints */
+.form-hint {
+    display: block;
+    color: var(--color-text-muted);
+    font-size: 0.75rem;
+    margin-top: 6px;
+    line-height: 1.4;
+}
+
+.form-hint a {
+    color: var(--color-accent);
+    text-decoration: underline;
+}
+
+.slots-confirm {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+}
+
+.slots-confirm input[type="checkbox"] {
+    accent-color: var(--color-accent);
+    width: 16px;
+    height: 16px;
+}
+
+/* Modal Buttons */
 .btn-secondary {
     padding: 9px 20px;
     background: var(--color-surface);
-    border: 1px solid var(--color-border);
+    border: 1px solid #cbd5e1;
     border-radius: var(--radius-md);
     font-size: 0.875rem;
     font-weight: 600;
@@ -666,7 +714,7 @@ textarea.form-input {
 
 .btn-secondary:hover {
     background: var(--color-bg);
-    border-color: #cbd5e1;
+    border-color: #94a3b8;
 }
 
 .btn-confirm {
@@ -674,7 +722,7 @@ textarea.form-input {
     align-items: center;
     gap: 7px;
     padding: 9px 20px;
-    background: var(--color-primary);
+    background: var(--color-accent);
     color: var(--color-text-inverse);
     border: none;
     border-radius: var(--radius-md);
@@ -685,15 +733,31 @@ textarea.form-input {
     transition: background var(--transition), transform var(--transition);
 }
 
-.btn-confirm:hover {
-    background: var(--color-primary-hover);
+.btn-confirm:hover:not(:disabled) {
+    background: var(--color-accent-hover);
     transform: translateY(-1px);
+}
+
+.btn-confirm:active:not(:disabled) {
+    transform: translateY(0);
 }
 
 .btn-confirm:disabled {
     opacity: 0.55;
     cursor: not-allowed;
     transform: none;
+}
+
+/* Closed Applications Badge */
+.badge--closed {
+    display: inline-block;
+    margin-top: 4px;
+    background: var(--color-error-bg);
+    color: var(--color-error-text);
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    font-size: 0.7rem;
+    font-weight: 600;
 }
 
 /* -------------------------
@@ -742,7 +806,7 @@ textarea.form-input {
 }
 
 /* -------------------------
-   RESPONSIVE
+   RESPONSIVE DESIGN
 ------------------------- */
 @media (max-width: 900px) {
     .content {
@@ -756,19 +820,44 @@ textarea.form-input {
     .table-card table {
         min-width: 700px;
     }
-
-    .form-row {
-        grid-template-columns: 1fr;
-    }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 640px) {
     .toolbar {
         flex-direction: column;
         align-items: stretch;
     }
 
     .create-btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .modal-overlay {
+        padding: 12px;
+    }
+
+    .modal-box {
+        max-height: calc(100vh - 24px);
+    }
+
+    .modal-header,
+    .modal-body,
+    .modal-footer {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+
+    .modal-footer {
+        flex-direction: column-reverse;
+    }
+
+    .modal-footer .btn-secondary,
+    .modal-footer .btn-confirm {
         width: 100%;
         justify-content: center;
     }

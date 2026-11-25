@@ -5,6 +5,7 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/role_helpers.php';
 
 $pdo = db();
 
@@ -16,15 +17,30 @@ if (!isset($_SESSION['user_id'])) {
     exit();
 }
 
-$currentRole = strtolower(trim($_SESSION['user_role'] ?? ''));
-$currentRole = str_replace('_', ' ', $currentRole);
+$currentRole = adminCurrentRole();
 $isSuperAdmin = ($currentRole === 'super admin');
+$isCampusCoordinator = ($currentRole === 'campus coordinator');
+$currentUserStmt = $pdo->prepare('SELECT campus_id FROM users WHERE id = ?');
+$currentUserStmt->execute([(int)$_SESSION['user_id']]);
+$currentCampusId = (int)($currentUserStmt->fetchColumn() ?: 0);
 
-if (!in_array($currentRole, ['super admin', 'admin'], true)) {
+if (!in_array($currentRole, ['super admin', 'admin', 'campus coordinator'], true)) {
     $_SESSION['error'] = 'You are not allowed to access User Management.';
     header('Location: dashboard.php?page=home');
     exit();
 }
+if ($isCampusCoordinator && $currentCampusId <= 0) {
+    http_response_code(403);
+    exit('Your account is not assigned to a campus.');
+}
+
+$campuses = $pdo->query("SELECT id, campus_name FROM campuses WHERE status = 'active' ORDER BY campus_name")->fetchAll(PDO::FETCH_ASSOC);
+$degreePrograms = $pdo->query("
+    SELECT id, campus_id, program_name
+    FROM degree_programs
+    WHERE status = 'active'
+    ORDER BY program_name
+")->fetchAll(PDO::FETCH_ASSOC);
 
 /* =========================
    CSRF TOKEN
@@ -78,11 +94,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
     }
     
     // PREVENT ADMIN FROM DELETING SUPER ADMINS
-    $targetStmt = $pdo->prepare("SELECT user_role, CONCAT(first_name, ' ', last_name) as name FROM users WHERE id = ?");
+    $targetStmt = $pdo->prepare("SELECT user_role, campus_id, CONCAT(first_name, ' ', last_name) as name FROM users WHERE id = ?");
     $targetStmt->execute([$deleteId]);
     $target = $targetStmt->fetch(PDO::FETCH_ASSOC);
 
     if ($target) {
+        if ($isCampusCoordinator && (int)$target['campus_id'] !== $currentCampusId) {
+            http_response_code(403);
+            exit('You can only manage accounts from your campus.');
+        }
         if (!$isSuperAdmin && strtolower($target['user_role']) === 'super admin') {
             $_SESSION['error'] = 'Only a Super Admin can delete another Super Admin.';
             header("Location: dashboard.php?page=users");
@@ -126,6 +146,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_create'])) {
     $extensionName = trim($_POST['extension_name'] ?? '');
     $birthdate     = trim($_POST['birthdate']      ?? '');
     $role          = strtolower(trim($_POST['role'] ?? ''));
+    $accountType   = strtolower(trim($_POST['account_type'] ?? ''));
+    $campusId      = $isCampusCoordinator ? $currentCampusId : (int)($_POST['campus_id'] ?? 0);
     $program       = trim($_POST['program']        ?? '');
     $contact       = trim($_POST['contact']        ?? '');
     $password      = $_POST['password']            ?? ''; // <-- Added password
@@ -140,14 +162,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_create'])) {
     ], true)) {
         $createErrors[] = 'Invalid role.';
     }
+    if ($isCampusCoordinator && $role !== 'applicant') {
+        $createErrors[] = 'Campus coordinators can create applicant accounts only.';
+    }
 
     // SECURITY: Prevent Admins from creating Super Admins
     if (!$isSuperAdmin && $role === 'super admin') {
         $createErrors[] = 'Only a Super Admin can create another Super Admin.';
     }
 
-    if ($role === 'applicant' && $program === '') {
-        $createErrors[] = 'Program is required for applicants.';
+    if ($role === 'applicant' && !in_array($accountType, ['student', 'faculty', 'non-teaching'], true)) {
+        $createErrors[] = 'Choose Student, Faculty, or Non-teaching as the applicant type.';
+    }
+    if ($role === 'applicant' && ($program === '' || $campusId <= 0)) {
+        $createErrors[] = 'Campus and degree program are required for applicant accounts.';
+    }
+    if ($role === 'campus coordinator' && $campusId <= 0) {
+        $createErrors[] = 'Choose a campus for the coordinator account.';
+    }
+    if ($campusId > 0) {
+        $campusCheck = $pdo->prepare("SELECT id FROM campuses WHERE id = ? AND status = 'active'");
+        $campusCheck->execute([$campusId]);
+        if (!$campusCheck->fetchColumn()) {
+            $createErrors[] = 'Choose a valid active campus.';
+        }
+    }
+    if ($role === 'applicant' && $program !== '') {
+        $degreeCheck = $pdo->prepare("SELECT id FROM degree_programs WHERE campus_id = ? AND program_name = ? AND status = 'active'");
+        $degreeCheck->execute([$campusId, $program]);
+        if (!$degreeCheck->fetchColumn()) {
+            $createErrors[] = 'Choose a degree program offered by the selected campus.';
+        }
+    }
+    if ($role === 'campus coordinator' && $campusId > 0) {
+        $coordinatorCheck = $pdo->prepare("
+            SELECT id FROM users
+            WHERE campus_id = ? AND LOWER(REPLACE(user_role, '_', ' ')) = 'campus coordinator'
+            LIMIT 1
+        ");
+        $coordinatorCheck->execute([$campusId]);
+        if ($coordinatorCheck->fetchColumn()) {
+            $createErrors[] = 'A campus coordinator account already exists for that campus.';
+        }
     }
 
     // Validate password
@@ -167,12 +223,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_create'])) {
                 $pdo->prepare("
                     INSERT INTO users
                         (first_name, middle_name, last_name, extension_name,
-                         birthdate, program, email, contact, user_role, status, password_hash, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                         birthdate, program, email, contact, user_role, account_type, campus_id,
+                         status, password_hash, created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ")->execute([
                     $firstName, $middleName ?: null, $lastName, $extensionName ?: null,
                     $birthdate ?: null, $program ?: null, $createdEmail, $contact ?: null,
-                    $role, 'active', password_hash($password, PASSWORD_DEFAULT), date('Y-m-d H:i:s'),
+                    $role, $role === 'applicant' ? $accountType : 'Student', $campusId ?: null,
+                    'active', password_hash($password, PASSWORD_DEFAULT), date('Y-m-d H:i:s'),
                 ]);
                 
                 $newId = (int)$pdo->lastInsertId();
@@ -208,6 +266,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_edit'])) {
     $extensionName = trim($_POST['edit_extension_name']  ?? '');
     $email         = trim($_POST['edit_email']           ?? '');
     $role          = trim($_POST['edit_role']            ?? '');
+    $accountType   = strtolower(trim($_POST['edit_account_type'] ?? ''));
+    $campusId      = $isCampusCoordinator ? $currentCampusId : (int)($_POST['edit_campus_id'] ?? 0);
+    $program       = trim($_POST['edit_program'] ?? '');
     $status        = strtolower(trim($_POST['edit_status'] ?? ''));
     $password      = $_POST['edit_password'] ?? '';
 
@@ -220,6 +281,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_edit'])) {
     ], true)) $editErrors[] = 'Invalid role.';
     if (!in_array($status, ['active', 'inactive'], true)) $editErrors[] = 'Invalid status.';
     if ($password !== '' && strlen($password) < 8) $editErrors[] = 'Password must be at least 8 characters.';
+    if ($isCampusCoordinator && $role !== 'applicant') $editErrors[] = 'Campus coordinators can only manage applicant accounts.';
+    if ($role === 'applicant' && !in_array($accountType, ['student', 'faculty', 'non-teaching'], true)) {
+        $editErrors[] = 'Choose Student, Faculty, or Non-teaching as the applicant type.';
+    }
+    if ($role === 'applicant' && ($campusId <= 0 || $program === '')) {
+        $editErrors[] = 'Campus and degree program are required for applicant accounts.';
+    }
+    if ($campusId > 0) {
+        $campusCheck = $pdo->prepare("SELECT id FROM campuses WHERE id = ? AND status = 'active'");
+        $campusCheck->execute([$campusId]);
+        if (!$campusCheck->fetchColumn()) $editErrors[] = 'Choose a valid active campus.';
+    }
+    if ($role === 'applicant' && $program !== '') {
+        $degreeCheck = $pdo->prepare("SELECT id FROM degree_programs WHERE campus_id = ? AND program_name = ? AND status = 'active'");
+        $degreeCheck->execute([$campusId, $program]);
+        if (!$degreeCheck->fetchColumn()) $editErrors[] = 'Choose a degree program offered by the selected campus.';
+    }
+    if ($role === 'campus coordinator' && $campusId > 0) {
+        $coordinatorCheck = $pdo->prepare("
+            SELECT id FROM users
+            WHERE campus_id = ? AND LOWER(REPLACE(user_role, '_', ' ')) = 'campus coordinator' AND id <> ?
+            LIMIT 1
+        ");
+        $coordinatorCheck->execute([$campusId, $editId]);
+        if ($coordinatorCheck->fetchColumn()) {
+            $editErrors[] = 'A campus coordinator account already exists for that campus.';
+        }
+    }
 
     // SECURITY: Prevent Admins from promoting someone to Super Admin
     if (!$isSuperAdmin && $role === 'super admin') {
@@ -227,9 +316,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_edit'])) {
     }
 
     // SECURITY: Prevent Admins from demoting a Super Admin
-    $targetStmt = $pdo->prepare("SELECT user_role FROM users WHERE id = ?");
+    $targetStmt = $pdo->prepare("SELECT user_role, campus_id FROM users WHERE id = ?");
     $targetStmt->execute([$editId]);
-    $targetRole = strtolower((string)$targetStmt->fetchColumn());
+    $target = $targetStmt->fetch(PDO::FETCH_ASSOC);
+    $targetRole = strtolower((string)($target['user_role'] ?? ''));
+    if (!$target) $editErrors[] = 'User account not found.';
+    if ($isCampusCoordinator && $target && (int)$target['campus_id'] !== $currentCampusId) {
+        $editErrors[] = 'You can only manage accounts from your campus.';
+    }
     if (!$isSuperAdmin && $targetRole === 'super admin') {
         $editErrors[] = 'Only a Super Admin can edit another Super Admin.';
     }
@@ -249,18 +343,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_edit'])) {
             ':extension_name' => $extensionName ?: null,
             ':email'          => $email,
             ':user_role'      => $role,
+            ':middle_name'    => trim((string)($_POST['edit_middle_name'] ?? '')) ?: null,
+            ':program'        => $role === 'applicant' ? $program : null,
+            ':account_type'   => $role === 'applicant' ? $accountType : 'Student',
+            ':campus_id'      => $role === 'applicant' ? $campusId : ($campusId ?: null),
             ':status'         => $status,
             ':id'             => $editId,
         ];
 
         if ($password !== '') {
             $params[':password_hash'] = password_hash($password, PASSWORD_DEFAULT);
-            $sql = "UPDATE users SET first_name=:first_name, last_name=:last_name,
+            $sql = "UPDATE users SET first_name=:first_name, middle_name=:middle_name, last_name=:last_name,
                         extension_name=:extension_name, email=:email, user_role=:user_role,
+                        program=:program, account_type=:account_type, campus_id=:campus_id,
                         status=:status, password_hash=:password_hash WHERE id=:id";
         } else {
-            $sql = "UPDATE users SET first_name=:first_name, last_name=:last_name,
+            $sql = "UPDATE users SET first_name=:first_name, middle_name=:middle_name, last_name=:last_name,
                         extension_name=:extension_name, email=:email, user_role=:user_role,
+                        program=:program, account_type=:account_type, campus_id=:campus_id,
                         status=:status WHERE id=:id";
         }
 
@@ -287,6 +387,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_edit'])) {
         header("Location: dashboard.php?page=users");
         exit();
     }
+    if ($editUser && $isCampusCoordinator && (int)$editUser['campus_id'] !== $currentCampusId) {
+        http_response_code(403);
+        exit('You can only manage accounts from your campus.');
+    }
 }
 
 $reopenCreateModal = ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_create']));
@@ -298,10 +402,20 @@ $reopenEditModal   = ($editUser !== null);
 $page       = max(1, (int) ($_GET['p'] ?? 1));
 $limit      = 10;
 $offset     = ($page - 1) * $limit;
-$totalUsers = (int) $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
+$scopeSql = $isCampusCoordinator ? ' WHERE campus_id = ' . $currentCampusId : '';
+$countUsersStmt = $pdo->query('SELECT COUNT(*) FROM users' . $scopeSql);
+$totalUsers = (int)$countUsersStmt->fetchColumn();
 $totalPages = max(1, (int)ceil($totalUsers / $limit));
 
-$stmt = $pdo->prepare("SELECT id, first_name, last_name, extension_name, user_role, status, created_at FROM users ORDER BY id DESC LIMIT :limit OFFSET :offset");
+$stmt = $pdo->prepare("
+    SELECT u.id, u.first_name, u.last_name, u.extension_name, u.user_role, u.account_type,
+           u.campus_id, c.campus_name, u.status, u.created_at
+    FROM users u
+    LEFT JOIN campuses c ON c.id = u.campus_id
+    WHERE (:campus_id = 0 OR u.campus_id = :campus_id)
+    ORDER BY u.id DESC LIMIT :limit OFFSET :offset
+");
+$stmt->bindValue(':campus_id', $isCampusCoordinator ? $currentCampusId : 0, PDO::PARAM_INT);
 $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
 $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
 $stmt->execute();
@@ -324,7 +438,7 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     <div class="page-header">
         <h2>User Management</h2>
-        <p>Manage system accounts and roles</p>
+        <p><?= $isCampusCoordinator ? 'Manage applicant accounts for your campus.' : 'Manage system accounts, coordinator assignments, and applicant types.' ?></p>
     </div>
 
     <div class="toolbar">
@@ -337,10 +451,7 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <option value="admin">Admin</option>
             <option value="super admin">Super Admin</option>
             <option value="applicant">Applicant</option>
-            <option value="campus coordinator">Campus Coordinator</option>
-            <option value="ovplia staff">OVPLIA Staff</option>
-            <option value="approving official">Approving Official</option>
-            <option value="bor secretary">BOR Secretary</option>
+            <option value="campus coordinator">Non-Teaching Staff</option>
         </select>
         <button class="create-btn" id="openModalBtn">
             <i class="fa fa-plus"></i> Add Account
@@ -353,6 +464,8 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <tr>
                     <th>Name</th>
                     <th>Role</th>
+                    <th>Applicant Type</th>
+                    <th>Campus</th>
                     <th>Status</th>
                     <th>Created</th>
                     <th>Action</th>
@@ -381,6 +494,8 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <td>
                             <span class="badge"><?= h(ucwords($u['user_role'])) ?></span>
                         </td>
+                        <td><?= h($u['account_type'] ? ucwords($u['account_type']) : '—') ?></td>
+                        <td><?= h($u['campus_name'] ?? '—') ?></td>
                         <td>
                             <span class="status-badge status-<?= h($status) ?>">
                                 <?= h(ucfirst($u['status'])) ?>
@@ -408,7 +523,7 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <?php endforeach; ?>
             <?php else: ?>
                 <tr>
-                    <td colspan="5">
+                    <td colspan="7">
                         <div class="empty-state">
                             <div class="empty-state-icon">
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -467,7 +582,7 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <div class="modal-header">
             <div>
                 <h3 id="createModalTitle">Add Account</h3>
-                <p>Create a new admin, super admin, or applicant account.</p>
+                <p>Create a campus coordinator or an applicant account. Non-teaching is also an applicant type.</p>
             </div>
             <button class="modal-close" id="closeCreateModalBtn" aria-label="Close modal">
                 <i class="fa fa-xmark"></i>
@@ -536,11 +651,10 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 'super admin' => 'Super Admin',
                                 'admin' => 'Admin',
                                 'applicant' => 'Applicant',
-                                'campus coordinator' => 'Campus Coordinator',
-                                'ovplia staff' => 'OVPLIA Staff',
-                                'approving official' => 'Approving Official',
-                                'bor secretary' => 'BOR Secretary',
+                                'non-teaching' => 'Non-Teaching Staff',
                             ];
+                            if (!$isSuperAdmin) unset($roles['super admin']);
+                            if ($isCampusCoordinator) $roles = ['applicant' => 'Applicant'];
                             $selectedCRole = $_POST['role'] ?? '';
                             foreach ($roles as $val => $label):
                             ?>
@@ -550,21 +664,34 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <?php endforeach; ?>
                         </select>
                     </div>
-                    <div class="form-group col-6" id="programField">
-                        <label>Program <span class="required">*</span></label>
-                        <select name="program" id="programSelect">
-                            <option value="">Select Program</option>
-                            <?php
-                            $programs        = ['BSIT' => 'BSIT', 'BSBA' => 'BSBA'];
-                            $selectedProgram = $_POST['program'] ?? '';
-                            foreach ($programs as $val => $label):
-                            ?>
-                                <option value="<?= h($val) ?>" <?= $selectedProgram === $val ? 'selected' : '' ?>>
-                                    <?= h($label) ?>
-                                </option>
+                    <div class="form-group col-6" id="campusField">
+                        <label>Campus <span class="required">*</span></label>
+                        <select name="campus_id" id="campusSelect" <?= $isCampusCoordinator ? 'disabled' : '' ?>>
+                            <option value="">Select Campus</option>
+                            <?php foreach ($campuses as $campus): ?>
+                                <option value="<?= (int)$campus['id'] ?>" <?= (int)($_POST['campus_id'] ?? $currentCampusId) === (int)$campus['id'] ? 'selected' : '' ?>><?= h($campus['campus_name']) ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <p class="form-instructions">Required for applicant accounts.</p>
+                        <?php if ($isCampusCoordinator): ?><input type="hidden" name="campus_id" value="<?= $currentCampusId ?>"><?php endif; ?>
+                    </div>
+                    <div class="form-group col-6" id="accountTypeField">
+                        <label>Applicant Type <span class="required">*</span></label>
+                        <select name="account_type" id="accountTypeSelect">
+                            <option value="">Select type</option>
+                            <?php foreach (['student' => 'Student', 'faculty' => 'Faculty', 'non-teaching' => 'Non-teaching'] as $value => $label): ?>
+                                <option value="<?= h($value) ?>" <?= ($_POST['account_type'] ?? '') === $value ? 'selected' : '' ?>><?= h($label) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group col-6" id="programField">
+                        <label>Degree Program <span class="required">*</span></label>
+                        <select name="program" id="programSelect">
+                            <option value="">Select Degree Program</option>
+                            <?php foreach ($degreePrograms as $degree): ?>
+                                <option value="<?= h($degree['program_name']) ?>" data-campus="<?= (int)$degree['campus_id'] ?>" <?= ($_POST['program'] ?? '') === $degree['program_name'] ? 'selected' : '' ?>><?= h($degree['program_name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="form-instructions">Required for applicant accounts; options follow the selected campus.</p>
                     </div>
                     <div class="form-group col-6">
                         <label>Contact Number</label>
@@ -688,6 +815,8 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 'approving official' => 'Approving Official',
                                 'bor secretary' => 'BOR Secretary',
                             ];
+                            if (!$isSuperAdmin) unset($roles['super admin']);
+                            if ($isCampusCoordinator) $roles = ['applicant' => 'Applicant'];
                             $selectedRole = $_POST['edit_role'] ?? ($editUser['user_role'] ?? '');
                             foreach ($roles as $val => $label):
                             ?>
@@ -708,6 +837,37 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 <option value="<?= h($val) ?>" <?= $selectedStatus === $val ? 'selected' : '' ?>>
                                     <?= h($label) ?>
                                 </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-group col-4" id="editCampusField">
+                        <label>Campus</label>
+                        <select name="edit_campus_id" id="editCampusSelect" <?= $isCampusCoordinator ? 'disabled' : '' ?>>
+                            <option value="">Select Campus</option>
+                            <?php foreach ($campuses as $campus): ?>
+                                <option value="<?= (int)$campus['id'] ?>" <?= (int)($editUser['campus_id'] ?? 0) === (int)$campus['id'] ? 'selected' : '' ?>><?= h($campus['campus_name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <?php if ($isCampusCoordinator): ?><input type="hidden" name="edit_campus_id" value="<?= $currentCampusId ?>"><?php endif; ?>
+                    </div>
+                    <div class="form-group col-4" id="editAccountTypeField">
+                        <label>Applicant Type</label>
+                        <select name="edit_account_type" id="editAccountTypeSelect">
+                            <option value="">Not an applicant</option>
+                            <?php foreach (['student' => 'Student', 'faculty' => 'Faculty', 'non-teaching' => 'Non-teaching'] as $value => $label): ?>
+                                <option value="<?= h($value) ?>" <?= strtolower((string)($editUser['account_type'] ?? '')) === $value ? 'selected' : '' ?>><?= h($label) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group col-4" id="editProgramField">
+                        <label>Degree Program</label>
+                        <select name="edit_program" id="editProgramSelect">
+                            <option value="">Select Degree Program</option>
+                            <?php foreach ($degreePrograms as $degree): ?>
+                                <option value="<?= h($degree['program_name']) ?>" data-campus="<?= (int)$degree['campus_id'] ?>" <?= ($editUser['program'] ?? '') === $degree['program_name'] ? 'selected' : '' ?>><?= h($degree['program_name']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -829,11 +989,48 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
         var roleEl = document.getElementById('roleSelect');
         var field  = document.getElementById('programField');
         var select = document.getElementById('programSelect');
+        var campusField = document.getElementById('campusField');
+        var campusSelect = document.getElementById('campusSelect');
+        var accountTypeField = document.getElementById('accountTypeField');
+        var accountTypeSelect = document.getElementById('accountTypeSelect');
         if (!roleEl || !field || !select) return;
 
-        var show = roleEl.value === 'applicant';
-        field.style.display = show ? 'flex' : 'none';
-        show ? select.setAttribute('required','required') : select.removeAttribute('required');
+        var applicant = roleEl.value === 'applicant';
+        var needsCampus = applicant || roleEl.value === 'campus coordinator';
+        field.style.display = applicant ? 'flex' : 'none';
+        campusField.style.display = needsCampus ? 'flex' : 'none';
+        accountTypeField.style.display = applicant ? 'flex' : 'none';
+        applicant ? select.setAttribute('required','required') : select.removeAttribute('required');
+        applicant ? accountTypeSelect.setAttribute('required','required') : accountTypeSelect.removeAttribute('required');
+        needsCampus ? campusSelect.setAttribute('required','required') : campusSelect.removeAttribute('required');
+        filterDegrees(campusSelect, select);
+    }
+
+    function filterDegrees(campusSelect, programSelect) {
+        if (!campusSelect || !programSelect) return;
+        Array.from(programSelect.options).forEach(function(option) {
+            if (!option.value) return;
+            option.hidden = !campusSelect.value || option.dataset.campus !== campusSelect.value;
+            if (option.hidden) option.selected = false;
+        });
+    }
+
+    function toggleEditApplicantFields() {
+        var role = document.querySelector('#editUserForm [name="edit_role"]');
+        if (!role) return;
+        var applicant = role.value === 'applicant';
+        var needsCampus = applicant || role.value === 'campus coordinator';
+        document.getElementById('editProgramField').style.display = applicant ? 'flex' : 'none';
+        document.getElementById('editAccountTypeField').style.display = applicant ? 'flex' : 'none';
+        document.getElementById('editCampusField').style.display = needsCampus ? 'flex' : 'none';
+        var campus = document.getElementById('editCampusSelect');
+        var program = document.getElementById('editProgramSelect');
+        filterDegrees(campus, program);
+        if (applicant) {
+            document.getElementById('editAccountTypeSelect').setAttribute('required', 'required');
+            program.setAttribute('required', 'required');
+            campus.setAttribute('required', 'required');
+        }
     }
 
     var createFirstName = document.querySelector('#createUserForm [name="first_name"]');
@@ -848,8 +1045,19 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
             toggleProgram();
         });
     }
+    var campusSelectEl = document.getElementById('campusSelect');
+    if (campusSelectEl) campusSelectEl.addEventListener('change', function() {
+        filterDegrees(campusSelectEl, document.getElementById('programSelect'));
+    });
+    var editRoleSelect = document.querySelector('#editUserForm [name="edit_role"]');
+    if (editRoleSelect) editRoleSelect.addEventListener('change', toggleEditApplicantFields);
+    var editCampusSelect = document.getElementById('editCampusSelect');
+    if (editCampusSelect) editCampusSelect.addEventListener('change', function() {
+        filterDegrees(editCampusSelect, document.getElementById('editProgramSelect'));
+    });
 
     generateEmailPreview();
     toggleProgram();
+    toggleEditApplicantFields();
 })();
 </script>

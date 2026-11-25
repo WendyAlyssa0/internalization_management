@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/roles.php';
+require_once __DIR__ . '/role_helpers.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -22,32 +23,118 @@ if (empty($_SESSION['csrf_token'])) {
 }
 $csrfToken = $_SESSION['csrf_token'];
 
-$pdo = db();
-$departmentOptions = require __DIR__ . '/../config/academic_departments.php';
-
-$limit  = 10;
-$page   = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
-$offset = ($page - 1) * $limit;
-
 if (!function_exists('h')) {
     function h($value): string {
         return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
     }
 }
+if (!function_exists('programJsonList')) {
+    function programJsonList(?string $value): array {
+        $decoded = json_decode((string)$value, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+}
+if (!function_exists('programDate')) {
+    function programDate(?string $value): string {
+        $ts = $value ? strtotime($value) : false;
+        return $ts ? date('M d, Y', $ts) : 'TBD';
+    }
+}
+if (!function_exists('placeholders')) {
+    function placeholders(array $items): string {
+        return implode(',', array_fill(0, count($items), '?'));
+    }
+}
+if (!function_exists('cleanIds')) {
+    function cleanIds($input): array {
+        if (!is_array($input)) return [];
+        $ids = array_filter(array_map('intval', $input), static function ($v) { return $v > 0; });
+        return array_values(array_unique($ids));
+    }
+}
+if (!function_exists('cleanStrings')) {
+    function cleanStrings($input): array {
+        if (!is_array($input)) return [];
+        $vals = array_filter(array_map('trim', array_map('strval', $input)), 'strlen');
+        return array_values(array_unique($vals));
+    }
+}
+
+$pdo = db();
+
+/* ------------------------------------------------------------------
+   S7: one-time seed for OUS and SAS.
+------------------------------------------------------------------ */
+try {
+    $ousCampus = $pdo->prepare("SELECT id FROM campuses WHERE LOWER(campus_name) IN ('ous','open university system') LIMIT 1");
+    $ousCampus->execute();
+    if ($ousId = (int)$ousCampus->fetchColumn()) {
+        $chk = $pdo->prepare("SELECT COUNT(*) FROM degree_programs WHERE campus_id = ? AND LOWER(program_name) LIKE '%open university%'");
+        $chk->execute([$ousId]);
+        if ((int)$chk->fetchColumn() === 0) {
+            $pdo->prepare("INSERT INTO degree_programs (program_name, campus_id, status) VALUES ('Open University System', ?, 'Active')")->execute([$ousId]);
+        }
+    }
+
+    $sasCampus = $pdo->prepare("SELECT id FROM campuses WHERE LOWER(campus_name) = 'sas' LIMIT 1");
+    $sasCampus->execute();
+    if ($sasId = (int)$sasCampus->fetchColumn()) {
+        $chk = $pdo->prepare("SELECT COUNT(*) FROM degree_programs WHERE campus_id = ? AND LOWER(program_name) = 'sas'");
+        $chk->execute([$sasId]);
+        if ((int)$chk->fetchColumn() === 0) {
+            $pdo->prepare("INSERT INTO degree_programs (program_name, campus_id, status) VALUES ('SAS', ?, 'Active')")->execute([$sasId]);
+        }
+    }
+} catch (Throwable $e) {
+    error_log('seed OUS/SAS: ' . $e->getMessage());
+}
+
+/* Dropdown data */
+$programTypes = $pdo->query("SELECT id, category_name FROM program_category WHERE LOWER(status) = 'active' ORDER BY category_name")->fetchAll(PDO::FETCH_ASSOC);
+$campusOptions = $pdo->query("SELECT id, campus_name FROM campuses WHERE LOWER(status) = 'active' ORDER BY campus_name")->fetchAll(PDO::FETCH_ASSOC);
+$degreeProgramOptions = $pdo->query("
+    SELECT dp.id, dp.program_name, dp.campus_id, c.campus_name
+    FROM degree_programs dp
+    INNER JOIN campuses c ON c.id = dp.campus_id
+    WHERE LOWER(dp.status) = 'active' AND LOWER(c.status) = 'active'
+    ORDER BY c.campus_name, dp.program_name
+")->fetchAll(PDO::FETCH_ASSOC);
+
+$campusNamesById = [];
+foreach ($campusOptions as $campusOption) {
+    $campusNamesById[(int)$campusOption['id']] = $campusOption['campus_name'];
+}
+$degreeNamesById = [];
+foreach ($degreeProgramOptions as $degreeOption) {
+    $degreeNamesById[(int)$degreeOption['id']] = $degreeOption['program_name'];
+}
+
+$limit  = 10;
+$page   = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
+$offset = ($page - 1) * $limit;
+$search = trim((string)($_GET['q'] ?? ''));
 
 /* =========================================================
-   AJAX HANDLERS (ADD / EDIT / DELETE)
+   AJAX HANDLERS (SAVE / DELETE / DUPLICATE)
 ========================================================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
     header('Content-Type: application/json');
 
-    if (!hash_equals($csrfToken, $_POST['csrf_token'] ?? '')) {
-        echo json_encode(['success' => false, 'message' => 'Invalid CSRF token']);
+    $fail = static function (string $message) {
+        echo json_encode(['success' => false, 'message' => $message]);
         exit;
+    };
+
+    if (!hash_equals($csrfToken, (string)($_POST['csrf_token'] ?? ''))) {
+        $fail('Invalid CSRF token. Please refresh the page and try again.');
     }
 
     $action = $_POST['action'];
 
+    /* ---------- DELETE ---------- */
     if ($action === 'delete') {
         $id = (int)($_POST['id'] ?? 0);
         try {
@@ -60,98 +147,317 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
 
+    /* ---------- S10: DUPLICATE AS NEW BATCH ---------- */
+    if ($action === 'duplicate') {
+        $id = (int)($_POST['id'] ?? 0);
+        if ($id <= 0) {
+            $fail('Invalid program.');
+        }
+
+        $src = $pdo->prepare("SELECT * FROM programs WHERE id = ?");
+        $src->execute([$id]);
+        $row = $src->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            $fail('Program not found.');
+        }
+
+        /* 1. Verify the parent records still exist */
+        $chkPartner = $pdo->prepare("SELECT COUNT(*) FROM partners WHERE id = ?");
+        $chkPartner->execute([(int)$row['partner_id']]);
+        if ((int)$chkPartner->fetchColumn() === 0) {
+            $fail('Cannot duplicate: the original program’s partner institution no longer exists.');
+        }
+
+        $chkCountry = $pdo->prepare("SELECT COUNT(*) FROM countries WHERE id = ?");
+        $chkCountry->execute([(int)$row['country_id']]);
+        if ((int)$chkCountry->fetchColumn() === 0) {
+            $fail('Cannot duplicate: the original program’s country no longer exists.');
+        }
+
+        /* 2. Derive "Base Title Batch N" */
+        $baseTitle = preg_replace('/\s*Batch\s+\d+\s*$/i', '', $row['program_name']);
+        $batchStmt = $pdo->prepare("SELECT program_name FROM programs WHERE program_name LIKE ?");
+        $batchStmt->execute([$baseTitle . ' Batch %']);
+        $maxBatch = 0;
+        foreach ($batchStmt->fetchAll(PDO::FETCH_COLUMN) as $existingName) {
+            if (preg_match('/Batch\s+(\d+)\s*$/i', $existingName, $m)) {
+                $maxBatch = max($maxBatch, (int)$m[1]);
+            }
+        }
+        $newTitle = $baseTitle . ' Batch ' . ($maxBatch + 1);
+
+        /* Fallback in case the title is UNIQUE and still collides */
+        $check = $pdo->prepare("SELECT COUNT(*) FROM programs WHERE program_name = ?");
+        $check->execute([$newTitle]);
+        if ((int)$check->fetchColumn() > 0) {
+            $newTitle .= ' (' . date('YmdHis') . ')';
+        }
+
+        /* 3. Reset per-batch values (Uses placeholder dates to prevent NOT NULL DB errors) */
+        $row['program_name']           = $newTitle;
+        $row['status']                 = 'Upcoming';
+        $row['start_date']             = date('Y-m-d');
+        $row['end_date']               = date('Y-m-d');
+        $row['application_start_date'] = date('Y-m-d');
+        $row['application_end_date']   = date('Y-m-d');
+
+        /* 4. Strip auto-managed columns */
+        unset(
+            $row['id'],
+            $row['created_at'],
+            $row['updated_at']
+        );
+
+        try {
+            $cols = array_keys($row);
+            $stmt = $pdo->prepare(
+                'INSERT INTO programs (' . implode(', ', $cols) . ') VALUES (' . placeholders($cols) . ')'
+            );
+            $stmt->execute(array_values($row));
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Created "' . $newTitle . '". Update its dates before publishing.',
+                'new_id'  => (int)$pdo->lastInsertId(),
+            ]);
+        } catch (PDOException $e) {
+            error_log('program duplicate: ' . $e->getMessage());
+            echo json_encode(['success' => false, 'message' => 'Database error while duplicating. Check error logs.']);
+        }
+        exit;
+    }
+
+    /* ---------- SAVE (add / edit) ---------- */
     if ($action === 'save') {
         $id = (int)($_POST['id'] ?? 0);
 
-        // Order matters: it must match the column order in the SQL below
+        $programTypeNames  = cleanStrings($_POST['program_types'] ?? []);
+        $participantTypes  = cleanStrings($_POST['eligible_participant_types'] ?? []);
+        $eligibleCampusIds = cleanIds($_POST['eligible_campuses'] ?? []);
+        $eligibleDegreeIds = cleanIds($_POST['eligible_degree_programs'] ?? []);
+        $otherType         = trim((string)($_POST['other_program_type'] ?? ''));
+
+        /* S5: "Others" replaced by the custom type typed by the admin */
+        $usesOthers = in_array('Others', $programTypeNames, true);
+        if ($usesOthers) {
+            if ($otherType === '') {
+                $fail('Enter the custom program type for Others.');
+            }
+            $programTypeNames = array_values(array_diff($programTypeNames, ['Others']));
+            $programTypeNames[] = $otherType;
+            $programTypeNames = array_values(array_unique($programTypeNames));
+        }
+
+        /* S5: persist the custom type so it's in the canonical list next time */
+        if ($usesOthers && $otherType !== '') {
+            try {
+                $chk = $pdo->prepare("SELECT id FROM program_category WHERE LOWER(category_name) = LOWER(?) LIMIT 1");
+                $chk->execute([$otherType]);
+                if (!$chk->fetchColumn()) {
+                    $pdo->prepare("INSERT INTO program_category (category_name, status) VALUES (?, 'Active')")
+                        ->execute([$otherType]);
+                }
+            } catch (Throwable $e) {
+                error_log('program_category upsert: ' . $e->getMessage());
+            }
+        }
+
+        /* Validate program types */
+        $validTypeNames = array_column($programTypes, 'category_name');
+        if ($usesOthers) {
+            $validTypeNames[] = $otherType;
+        }
+        $invalidTypes = array_diff($programTypeNames, $validTypeNames);
+
+        /* Validate participant types (S4) */
+        $validParticipantTypes = ['student', 'faculty', 'non-teaching'];
+        $invalidParticipants   = array_diff($participantTypes, $validParticipantTypes);
+
+        if (!$programTypeNames || $invalidTypes) {
+            $fail('Select at least one valid program type.');
+        }
+        if (!$participantTypes || $invalidParticipants) {
+            $fail('Select at least one eligible participant type.');
+        }
+        if (!$eligibleCampusIds) {
+            $fail('Select at least one eligible campus.');
+        }
+        if (!$eligibleDegreeIds) {
+            $fail('Select at least one eligible degree program.');
+        }
+
+        /* Validate campuses exist and are active */
+        $st = $pdo->prepare("SELECT COUNT(*) FROM campuses WHERE LOWER(status) = 'active' AND id IN (" . placeholders($eligibleCampusIds) . ")");
+        $st->execute($eligibleCampusIds);
+        if ((int)$st->fetchColumn() !== count($eligibleCampusIds)) {
+            $fail('One or more selected campuses are invalid.');
+        }
+
+        /* Validate degree programs (S7: per campus) */
+        $st = $pdo->prepare(
+            "SELECT program_name FROM degree_programs
+             WHERE LOWER(status) = 'active'
+               AND id IN (" . placeholders($eligibleDegreeIds) . ")
+               AND campus_id IN (" . placeholders($eligibleCampusIds) . ")
+             ORDER BY program_name"
+        );
+        $st->execute(array_merge($eligibleDegreeIds, $eligibleCampusIds));
+        $degreeNames = $st->fetchAll(PDO::FETCH_COLUMN);
+        if (count($degreeNames) !== count($eligibleDegreeIds)) {
+            $fail('One or more degree programs do not belong to the selected campuses.');
+        }
+
+        /* Legacy columns kept for older pages */
+        $legacyType         = implode(', ', $programTypeNames);
+        $legacyParticipants = count($participantTypes) === 1 ? ucfirst($participantTypes[0]) : 'Both';
+        $legacyDegrees      = $degreeNames ? implode(', ', $degreeNames) : 'All Departments';
+
+        /* Dates */
+        $startDate = trim((string)($_POST['start_date'] ?? ''));
+        $endDate   = trim((string)($_POST['end_date'] ?? ''));
+        $dateRe    = '/^\d{4}-\d{2}-\d{2}$/';
+        if (!preg_match($dateRe, $startDate) || !preg_match($dateRe, $endDate)) {
+            $fail('Enter a valid program start and end date.');
+        }
+        if ($endDate < $startDate) {
+            $fail('Program end date cannot be before its start date.');
+        }
+
+        /* S9: application window is set once, then locked */
+        $applicationStart = trim((string)($_POST['application_start_date'] ?? '')) ?: null;
+        $applicationEnd   = trim((string)($_POST['application_end_date'] ?? '')) ?: null;
+        if ($id > 0) {
+            $windowStmt = $pdo->prepare('SELECT application_start_date, application_end_date FROM programs WHERE id = ?');
+            $windowStmt->execute([$id]);
+            $applicationWindow = $windowStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$applicationWindow) {
+                $fail('Program not found.');
+            }
+            $applicationStart = $applicationWindow['application_start_date'];
+            $applicationEnd   = $applicationWindow['application_end_date'];
+        }
+        if ($applicationStart === null || $applicationEnd === null ||
+            !preg_match($dateRe, $applicationStart) || !preg_match($dateRe, $applicationEnd) ||
+            $applicationEnd < $applicationStart) {
+            $fail('Enter a valid application start and end date.');
+        }
+
+        /* Other fields */
+        $programName = trim((string)($_POST['program_name'] ?? ''));
+        if ($programName === '') {
+            $fail('Program name is required.');
+        }
+        $status = trim((string)($_POST['status'] ?? 'Active'));
+        if (!in_array($status, ['Active', 'Upcoming', 'Completed', 'Suspended'], true)) {
+            $fail('Invalid status.');
+        }
+        $direction = trim((string)($_POST['mobility_direction'] ?? 'outbound'));
+        if (!in_array($direction, ['inbound', 'outbound'], true)) {
+            $fail('Choose whether this program is inbound or outbound.');
+        }
+        $countryId = (int)($_POST['country_id'] ?? 0);
+        $partnerId = (int)($_POST['partner_id'] ?? 0);
+        if ($countryId <= 0 || $partnerId <= 0) {
+            $fail('Select a country and a partner institution.');
+        }
+
+        /* S8: ceiling is optional; must be confirmed by the partner */
+        $slots            = max(0, (int)($_POST['slots'] ?? 0));
+        $ceilingConfirmed = !empty($_POST['slots_confirmed']);
+        if ($slots > 0 && !$ceilingConfirmed) {
+            $fail('Only enter a capacity ceiling when the partner has confirmed it.');
+        }
+
         $data = [
-            'program_name'          => trim($_POST['program_name'] ?? ''),
-            'program_type'          => trim($_POST['program_type'] ?? ''),
-            'eligible_department'   => trim($_POST['eligible_department'] ?? ''),
-            'eligible_account_type' => trim($_POST['eligible_account_type'] ?? ''),
-            'status'                => trim($_POST['status'] ?? 'Active'),
-            'country_id'            => (int)($_POST['country_id'] ?? 0),
-            'partner_id'            => (int)($_POST['partner_id'] ?? 0),
-            'slots'                 => max(0, (int)($_POST['slots'] ?? 0)),   // 0 = unlimited
-            'start_date'            => $_POST['start_date'] ?? null,
-            'end_date'              => $_POST['end_date'] ?? null,
-            'description'           => trim($_POST['description'] ?? '')
+            'program_name'               => $programName,
+            'program_type'               => $legacyType,
+            'program_types'              => json_encode($programTypeNames, JSON_UNESCAPED_UNICODE),
+            'nature_of_partnership'      => trim((string)($_POST['nature_of_partnership'] ?? '')),
+            'eligible_department'        => $legacyDegrees,
+            'eligible_degree_programs'   => json_encode($eligibleDegreeIds),
+            'eligible_campuses'          => json_encode($eligibleCampusIds),
+            'eligible_account_type'      => $legacyParticipants,
+            'eligible_participant_types' => json_encode($participantTypes),
+            'status'                     => $status,
+            'mobility_direction'         => $direction,
+            'country_id'                 => $countryId,
+            'partner_id'                 => $partnerId,
+            'slots'                      => $slots,
+            'start_date'                 => $startDate,
+            'end_date'                   => $endDate,
+            'application_start_date'     => $applicationStart,
+            'application_end_date'       => $applicationEnd,
+            'description'                => trim((string)($_POST['description'] ?? '')),
         ];
 
         try {
+            $warning = null;
+
             if ($id > 0) {
-                // Do not allow fewer slots than already-approved applicants
-                if ($data['slots'] > 0) {
+                /* S8: don't block when the ceiling drops below approved count — just warn */
+                if ($slots > 0) {
                     $filledStmt = $pdo->prepare("SELECT COUNT(*) FROM applications WHERE program_id = ? AND LOWER(TRIM(status)) = 'approved'");
                     $filledStmt->execute([$id]);
                     $filled = (int)$filledStmt->fetchColumn();
-                    if ($data['slots'] < $filled) {
-                        echo json_encode(['success' => false, 'message' => "Slots cannot be lower than the $filled applicant(s) already approved."]);
-                        exit;
+                    if ($slots < $filled) {
+                        $warning = "Note: $filled applicant(s) are already approved, above the new ceiling of $slots.";
                     }
                 }
 
-                // Update
-                $sql = "UPDATE programs SET program_name=?, program_type=?, eligible_department=?, eligible_account_type=?, status=?, country_id=?, partner_id=?, slots=?, start_date=?, end_date=?, description=? WHERE id=?";
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute([...array_values($data), $id]);
-                echo json_encode(['success' => true, 'message' => 'Program updated successfully.']);
+                $cols = array_keys($data);
+                $set  = implode(', ', array_map(static function ($c) { return "$c = ?"; }, $cols));
+                $stmt = $pdo->prepare("UPDATE programs SET $set WHERE id = ?");
+                $stmt->execute(array_merge(array_values($data), [$id]));
+
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'Program updated successfully.',
+                    'warning' => $warning,
+                ]);
             } else {
-                // Insert
-                $sql = "INSERT INTO programs (program_name, program_type, eligible_department, eligible_account_type, status, country_id, partner_id, slots, start_date, end_date, description) VALUES (?,?,?,?,?,?,?,?,?,?,?)";
-                $stmt = $pdo->prepare($sql);
+                $cols = array_keys($data);
+                $stmt = $pdo->prepare(
+                    'INSERT INTO programs (' . implode(', ', $cols) . ') VALUES (' . placeholders($cols) . ')'
+                );
                 $stmt->execute(array_values($data));
                 echo json_encode(['success' => true, 'message' => 'Program created successfully.']);
             }
         } catch (PDOException $e) {
             error_log('program save: ' . $e->getMessage());
-            echo json_encode(['success' => false, 'message' => 'Database error while saving.']);
+            echo json_encode(['success' => false, 'message' => 'Database error while saving. Check the PHP error log.']);
         }
         exit;
     }
+
+    $fail('Unknown action.');
 }
 
 /* =========================================================
    FETCH DATA
 ========================================================= */
-$programTypes = $pdo->query("SELECT id, category_name FROM program_category WHERE status = 'Active' ORDER BY category_name")->fetchAll(PDO::FETCH_ASSOC);
-$partners = $pdo->query("SELECT id, country_id, institution_name FROM partners WHERE status = 'Active' ORDER BY institution_name")->fetchAll(PDO::FETCH_ASSOC);
+$partners = $pdo->query("SELECT id, country_id, institution_name FROM partners WHERE LOWER(status) = 'active' ORDER BY institution_name")->fetchAll(PDO::FETCH_ASSOC);
 
-// Fetch active country/address records, then synchronize their names with
-// the countries table used by program and partner foreign keys.
+/* Sync country names from countries_addresses into `countries` */
 $addressRows = $pdo->query("
     SELECT DISTINCT country_name
     FROM countries_addresses
-    WHERE LOWER(status) = 'active'
-      AND country_name <> ''
+    WHERE LOWER(status) = 'active' AND country_name <> ''
     ORDER BY country_name
 ")->fetchAll(PDO::FETCH_ASSOC);
+
+$findCountry   = $pdo->prepare("SELECT id FROM countries WHERE country_name = ? AND LOWER(status) = 'active' ORDER BY id ASC LIMIT 1");
+$insertCountry = $pdo->prepare("INSERT INTO countries (country_name, status) VALUES (?, 'Active')");
 
 $countries = [];
 foreach ($addressRows as $addressRow) {
     $countryName = trim((string)$addressRow['country_name']);
-
-    $stmt = $pdo->prepare("
-        SELECT id
-        FROM countries
-        WHERE country_name = ?
-          AND LOWER(status) = 'active'
-        ORDER BY id ASC
-        LIMIT 1
-    ");
-    $stmt->execute([$countryName]);
-    $countryId = (int)($stmt->fetchColumn() ?: 0);
-
+    $findCountry->execute([$countryName]);
+    $countryId = (int)($findCountry->fetchColumn() ?: 0);
     if ($countryId <= 0) {
-        $stmt = $pdo->prepare("INSERT INTO countries (country_name, status) VALUES (?, 'Active')");
-        $stmt->execute([$countryName]);
+        $insertCountry->execute([$countryName]);
         $countryId = (int)$pdo->lastInsertId();
     }
-
-    $countries[] = [
-        'id' => $countryId,
-        'country_name' => $countryName
-    ];
+    $countries[] = ['id' => $countryId, 'country_name' => $countryName];
 }
 
 $countryMap = [];
@@ -159,19 +465,45 @@ foreach ($countries as $c) {
     $countryMap[$c['id']] = $c['country_name'];
 }
 
-$totalPrograms = (int)$pdo->query("SELECT COUNT(*) FROM programs")->fetchColumn();
-$totalPages = max(1, ceil($totalPrograms / $limit));
+/* Server-side search across name and partner */
+$where  = '';
+$params = [];
+if ($search !== '') {
+    $where = "WHERE (p.program_name LIKE :q1 OR pr.institution_name LIKE :q2)";
+    $like  = '%' . $search . '%';
+    $params[':q1'] = $like;
+    $params[':q2'] = $like;
+}
 
+$countStmt = $pdo->prepare("SELECT COUNT(*) FROM programs p LEFT JOIN partners pr ON p.partner_id = pr.id $where");
+$countStmt->execute($params);
+$totalPrograms = (int)$countStmt->fetchColumn();
+$totalPages = max(1, (int)ceil($totalPrograms / $limit));
+if ($page > $totalPages) {
+    $page = $totalPages;
+    $offset = ($page - 1) * $limit;
+}
+
+/* S9: expose applications_closed so the UI can flag it */
 $stmt = $pdo->prepare("
     SELECT p.*,
            pr.institution_name,
            (SELECT COUNT(*) FROM applications a
-             WHERE a.program_id = p.id AND LOWER(TRIM(a.status)) = 'approved') AS filled_slots
+             WHERE a.program_id = p.id AND LOWER(TRIM(a.status)) = 'approved') AS filled_slots,
+           CASE
+             WHEN p.application_end_date IS NULL THEN 0
+             WHEN p.application_end_date < CURDATE() THEN 1
+             ELSE 0
+           END AS applications_closed
     FROM programs p
     LEFT JOIN partners pr ON p.partner_id = pr.id
+    $where
     ORDER BY p.id DESC
     LIMIT :limit OFFSET :offset
 ");
+foreach ($params as $k => $v) {
+    $stmt->bindValue($k, $v, PDO::PARAM_STR);
+}
 $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
 $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
 $stmt->execute();
@@ -181,80 +513,18 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 <link rel="stylesheet" href="../asset/css/programs.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
-<style>
-    /* Modal fix: keep the box inside the screen, scroll only the form body,
-       and keep the Cancel / Save buttons always visible and clickable. */
-    #addProgramModal.modal-overlay,
-    #editProgramModal.modal-overlay {
-        padding: 16px;
-        box-sizing: border-box;
-        overflow-y: auto;
-    }
-    #addProgramModal .modal-box,
-    #editProgramModal .modal-box {
-        display: flex;
-        flex-direction: column;
-        width: 100%;
-        max-width: 720px;
-        max-height: calc(100vh - 32px);
-        margin: auto;
-        overflow: hidden;
-    }
-    #addProgramModal .modal-box > form,
-    #editProgramModal .modal-box > form {
-        display: flex;
-        flex-direction: column;
-        flex: 1 1 auto;
-        min-height: 0;
-    }
-    #addProgramModal .modal-header,
-    #editProgramModal .modal-header,
-    #addProgramModal .modal-footer,
-    #editProgramModal .modal-footer {
-        flex-shrink: 0;
-    }
-    #addProgramModal .modal-body,
-    #editProgramModal .modal-body {
-        flex: 1 1 auto;
-        min-height: 0;
-        overflow-y: auto;
-        padding-bottom: 8px;
-    }
-    #addProgramModal .modal-footer,
-    #editProgramModal .modal-footer {
-        position: relative;
-        z-index: 2;
-        display: flex;
-        justify-content: flex-end;
-        gap: 12px;
-        padding: 16px 24px;
-        background: #fff;
-        border-top: 1px solid #e2e8f0;
-    }
-    #addProgramModal .modal-footer button,
-    #editProgramModal .modal-footer button {
-        cursor: pointer;
-        pointer-events: auto;
-    }
-    @media (max-width: 640px) {
-        #addProgramModal .form-row,
-        #editProgramModal .form-row {
-            grid-template-columns: 1fr !important;
-            flex-direction: column;
-        }
-    }
-</style>
-
 <div class="content">
     <div class="page-header">
         <h2>Program Management</h2>
-        <p>Manage academic programs and course offerings</p>
+        <p>Manage international programs, eligibility, and application windows</p>
     </div>
 
     <div class="toolbar">
         <div class="search-wrap">
             <i class="fa fa-search"></i>
-            <input type="text" id="searchInput" placeholder="Search programs...">
+            <input type="text" id="searchInput" value="<?= h($search) ?>"
+                   placeholder="Search by name / program"
+                   aria-label="Search programs by program name or partner institution">
         </div>
         <button type="button" class="create-btn" id="btnAddProgram">
             <i class="fa fa-plus"></i> Add Program
@@ -266,9 +536,10 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <thead>
                 <tr>
                     <th>Program Name</th>
-                    <th>Type</th>
-                    <th>Eligible Account Type</th>
-                    <th>Eligible Department</th>
+                    <th>Program Type</th>
+                    <th>Eligible Participants</th>
+                    <th>Eligible Campus / Degree</th>
+                    <th>Direction</th>
                     <th>Country</th>
                     <th>Partner</th>
                     <th>Slots</th>
@@ -281,20 +552,45 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <?php if ($programs): ?>
                 <?php foreach ($programs as $p): ?>
                     <?php
-                        $slotsTotal = (int)($p['slots'] ?? 0);
+                        $slotsTotal  = (int)($p['slots'] ?? 0);
                         $slotsFilled = (int)($p['filled_slots'] ?? 0);
-                        $slotsFull = $slotsTotal > 0 && $slotsFilled >= $slotsTotal;
+                        $slotsFull   = $slotsTotal > 0 && $slotsFilled >= $slotsTotal;
+                        $appClosed   = (int)($p['applications_closed'] ?? 0) === 1;
+
+                        $participantLabels = programJsonList($p['eligible_participant_types'] ?? null);
+                        if (!$participantLabels) {
+                            $participantLabels = ($p['eligible_account_type'] ?? '') === 'Both'
+                                ? ['student', 'faculty']
+                                : [strtolower((string)($p['eligible_account_type'] ?? 'student'))];
+                        }
+
+                        $campusIds = array_map('intval', programJsonList($p['eligible_campuses'] ?? null));
+                        $degreeIds = array_map('intval', programJsonList($p['eligible_degree_programs'] ?? null));
+                        $campusLabels = [];
+                        foreach ($campusIds as $cid) {
+                            if (isset($campusNamesById[$cid])) $campusLabels[] = $campusNamesById[$cid];
+                        }
+                        $degreeLabels = [];
+                        foreach ($degreeIds as $did) {
+                            if (isset($degreeNamesById[$did])) $degreeLabels[] = $degreeNamesById[$did];
+                        }
+                        $eligibilityText = implode(', ', $campusLabels);
+                        if ($degreeLabels) {
+                            $eligibilityText .= ($eligibilityText !== '' ? ' · ' : '') . implode(', ', $degreeLabels);
+                        }
+                        if ($eligibilityText === '') $eligibilityText = 'Not set';
                     ?>
-                    <tr data-name="<?= strtolower(h($p['program_name'])) ?>" data-id="<?= (int)$p['id'] ?>">
+                    <tr data-id="<?= (int)$p['id'] ?>">
                         <td>
                             <div class="program-name">
                                 <div class="program-icon"><i class="fa fa-graduation-cap"></i></div>
                                 <div class="program-info"><strong><?= h($p['program_name']) ?></strong></div>
                             </div>
                         </td>
-                        <td><?= h($p['program_type']) ?></td>
-                        <td><?= h($p['eligible_account_type'] ?? 'All Applicants') ?></td>
-                        <td><?= h($p['eligible_department'] ?? 'All Departments') ?></td>
+                        <td><?= h(implode(', ', programJsonList($p['program_types'] ?? null)) ?: ($p['program_type'] ?? '')) ?></td>
+                        <td><?= h(implode(', ', array_map('ucwords', $participantLabels))) ?></td>
+                        <td><?= h($eligibilityText) ?></td>
+                        <td><?= h(ucfirst($p['mobility_direction'] ?? 'outbound')) ?></td>
                         <td><?= h($countryMap[$p['country_id']] ?? 'N/A') ?></td>
                         <td><?= h($p['institution_name'] ?? 'N/A') ?></td>
                         <td>
@@ -306,22 +602,28 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                     <br><small style="color:#b91c1c;">Full</small>
                                 <?php endif; ?>
                             <?php else: ?>
-                                <span style="color:#64748b;">Unlimited</span>
+                                <span style="color:#64748b;">Not specified</span>
                             <?php endif; ?>
                         </td>
                         <td>
                             <span class="status-badge status-<?= strtolower(h($p['status'])) ?>">
                                 <?= h($p['status']) ?>
                             </span>
+                            <?php if ($appClosed): ?>
+                                <br><span class="badge--closed">Applications closed</span>
+                            <?php endif; ?>
                         </td>
+                        <td><?= h(programDate($p['start_date'] ?? null)) ?> - <?= h(programDate($p['end_date'] ?? null)) ?></td>
                         <td>
-                            <?= date('M d, Y', strtotime($p['start_date'])) ?> - <?= date('M d, Y', strtotime($p['end_date'])) ?>
-                        </td>
-                        <td>
-                            <button type="button" class="action-btn edit-btn" data-program='<?= htmlspecialchars(json_encode($p), ENT_QUOTES, "UTF-8") ?>'>
+                            <button type="button" class="action-btn edit-btn" aria-label="Edit program"
+                                    data-program='<?= htmlspecialchars(json_encode($p), ENT_QUOTES, "UTF-8") ?>'>
                                 <i class="fa fa-pen"></i>
                             </button>
-                            <button type="button" class="action-btn delete-btn" data-id="<?= (int)$p['id'] ?>">
+                            <button type="button" class="action-btn duplicate-btn" aria-label="Duplicate as new batch"
+                                    data-id="<?= (int)$p['id'] ?>">
+                                <i class="fa fa-clone"></i>
+                            </button>
+                            <button type="button" class="action-btn delete-btn" aria-label="Delete program" data-id="<?= (int)$p['id'] ?>">
                                 <i class="fa fa-trash"></i>
                             </button>
                         </td>
@@ -329,7 +631,7 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <?php endforeach; ?>
             <?php else: ?>
                 <tr>
-                    <td colspan="10">
+                    <td colspan="11">
                         <div class="empty-state">
                             <div class="empty-state-icon">
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -337,8 +639,13 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                     <path d="M6 12v5c3 3 9 3 12 0v-5"/>
                                 </svg>
                             </div>
-                            <h3>No programs yet</h3>
-                            <p>Click "Add Program" to create your first one.</p>
+                            <?php if ($search !== ''): ?>
+                                <h3>No matching programs</h3>
+                                <p>Try a different program name or partner institution.</p>
+                            <?php else: ?>
+                                <h3>No programs yet</h3>
+                                <p>Click "Add Program" to create your first one.</p>
+                            <?php endif; ?>
                         </div>
                     </td>
                 </tr>
@@ -349,11 +656,11 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <div class="pagination">
             <span>Showing <?= count($programs) ?> of <?= $totalPrograms ?> programs</span>
             <div class="pages">
-                <?php $baseQ = array_merge($_GET, []); unset($baseQ['p'], $baseQ['delete']); ?>
+                <?php $baseQ = $_GET; unset($baseQ['p'], $baseQ['delete']); ?>
                 <?php if ($page > 1): ?>
-                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>"><i class="fa fa-angle-left"></i></a>
+                    <a class="page-arrow" aria-label="Previous page" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>"><i class="fa fa-angle-left"></i></a>
                 <?php else: ?>
-                    <button class="page-arrow" disabled><i class="fa fa-angle-left"></i></button>
+                    <button class="page-arrow" disabled aria-label="Previous page"><i class="fa fa-angle-left"></i></button>
                 <?php endif; ?>
 
                 <?php for ($i = 1; $i <= $totalPages; $i++): ?>
@@ -361,9 +668,9 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <?php endfor; ?>
 
                 <?php if ($page < $totalPages): ?>
-                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page + 1]))) ?>"><i class="fa fa-angle-right"></i></a>
+                    <a class="page-arrow" aria-label="Next page" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page + 1]))) ?>"><i class="fa fa-angle-right"></i></a>
                 <?php else: ?>
-                    <button class="page-arrow" disabled><i class="fa fa-angle-right"></i></button>
+                    <button class="page-arrow" disabled aria-label="Next page"><i class="fa fa-angle-right"></i></button>
                 <?php endif; ?>
             </div>
         </div>
@@ -378,7 +685,7 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <div class="modal-icon"><i class="fa fa-pen-to-square"></i></div>
                 <div><h3>Edit Program</h3><p class="modal-subtitle">Update program details</p></div>
             </div>
-            <button type="button" class="modal-close" data-close="editProgramModal"><i class="fa fa-times"></i></button>
+            <button type="button" class="modal-close" aria-label="Close" data-close="editProgramModal"><i class="fa fa-times"></i></button>
         </div>
 
         <form id="editProgramForm">
@@ -388,43 +695,58 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             <div class="modal-body">
                 <div class="form-group">
-                    <label>Program Name</label>
+                    <label for="edit_program_name">Program Name</label>
                     <input type="text" name="program_name" id="edit_program_name" class="form-input" required>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Eligible Department</label>
-                        <select name="eligible_department" id="edit_eligible_department" class="form-input" required>
-                            <option value="All Departments">All Departments</option>
-                            <?php foreach ($departmentOptions as $department => $label): ?>
-                                <option value="<?= h($department) ?>"><?= h($label) ?></option>
+                        <label for="edit_eligible_campuses">Eligible Campuses</label>
+                        <select name="eligible_campuses[]" id="edit_eligible_campuses" class="form-input" multiple required>
+                            <?php foreach ($campusOptions as $campus): ?>
+                                <option value="<?= (int)$campus['id'] ?>"><?= h($campus['campus_name']) ?></option>
                             <?php endforeach; ?>
                         </select>
+                        <small class="form-hint">Hold Ctrl (or Cmd) to select more than one.</small>
                     </div>
                     <div class="form-group">
-                        <label>Eligible Account Type</label>
-                        <select name="eligible_account_type" id="edit_eligible_account_type" class="form-input" required>
-                            <option value="Student">Student</option>
-                            <option value="Faculty">Faculty</option>
-                            <option value="Non-Teaching">Non-Teaching</option>
-                            <option value ="Both">Both</option>
+                        <label for="edit_eligible_degree_programs">Eligible Degree Programs</label>
+                        <select name="eligible_degree_programs[]" id="edit_eligible_degree_programs" class="form-input" multiple required>
+                            <?php foreach ($degreeProgramOptions as $degree): ?>
+                                <option value="<?= (int)$degree['id'] ?>" data-campus="<?= (int)$degree['campus_id'] ?>"><?= h($degree['program_name'] . ' — ' . $degree['campus_name']) ?></option>
+                            <?php endforeach; ?>
                         </select>
+                        <small class="form-hint">Shows degree programs of the selected campuses. <a href="degree_programs.php">Manage degree programs</a></small>
                     </div>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Program Type</label>
-                        <select name="program_type" id="edit_program_type" class="form-input" required>
-                            <option value="">Select Program Type</option>
+                        <label for="edit_program_types">Program Types</label>
+                        <select name="program_types[]" id="edit_program_types" class="form-input" multiple required>
                             <?php foreach ($programTypes as $type): ?>
                                 <option value="<?= h($type['category_name']) ?>"><?= h($type['category_name']) ?></option>
                             <?php endforeach; ?>
+                            <option value="Others">Others</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Status</label>
+                        <label for="edit_other_program_type">Other program type (when Others is selected)</label>
+                        <input type="text" name="other_program_type" id="edit_other_program_type" class="form-input" maxlength="100">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Eligible Participants</label>
+                        <fieldset id="edit_participant_types">
+                            <label><input type="checkbox" name="eligible_participant_types[]" value="student"> Student</label>
+                            <label><input type="checkbox" name="eligible_participant_types[]" value="faculty"> Faculty</label>
+                            <label><input type="checkbox" name="eligible_participant_types[]" value="non-teaching"> Non-teaching</label>
+                        </fieldset>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit_status">Status</label>
                         <select name="status" id="edit_status" class="form-input" required>
                             <option value="Active">Active</option>
                             <option value="Upcoming">Upcoming</option>
@@ -434,18 +756,26 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     </div>
                 </div>
 
+                <div class="form-group">
+                    <label for="edit_mobility_direction">Mobility Direction</label>
+                    <select name="mobility_direction" id="edit_mobility_direction" class="form-input" required>
+                        <option value="outbound">Outbound</option>
+                        <option value="inbound">Inbound</option>
+                    </select>
+                </div>
+
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Country</label>
+                        <label for="edit_program_country">Country</label>
                         <select name="country_id" id="edit_program_country" class="form-input" required>
                             <option value="">Select Country</option>
                             <?php foreach ($countries as $country): ?>
-                                <option value="<?= h($country['id']) ?>"><?= h($country['country_name']) ?></option>
+                                <option value="<?= (int)$country['id'] ?>"><?= h($country['country_name']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Partner Institution</label>
+                        <label for="edit_program_partner">Partner Institution</label>
                         <select name="partner_id" id="edit_program_partner" class="form-input" required>
                             <option value="">Select Country First</option>
                         </select>
@@ -453,26 +783,45 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 </div>
 
                 <div class="form-group">
-                    <label>Available Slots</label>
+                    <label for="edit_slots">Capacity Ceiling (optional)</label>
                     <input type="number" name="slots" id="edit_slots" class="form-input" min="0" step="1" value="0" required>
-                    <small style="color:#94a3b8; font-size:11px; margin-top:4px; display:block;">
-                        Maximum number of participants. Enter 0 for unlimited.
-                    </small>
+                    <small class="form-hint">Leave at 0 if the partner has not confirmed a ceiling. Lowering it below approved applicants only shows a warning.</small>
+                    <label class="slots-confirm">
+                        <input type="checkbox" name="slots_confirmed" id="edit_slots_confirmed" value="1">
+                        Partner has confirmed this ceiling
+                    </label>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Start Date</label>
+                        <label for="edit_start">Program Start Date</label>
                         <input type="date" name="start_date" id="edit_start" class="form-input" required>
                     </div>
                     <div class="form-group">
-                        <label>End Date</label>
+                        <label for="edit_end">Program End Date</label>
                         <input type="date" name="end_date" id="edit_end" class="form-input" required>
                     </div>
                 </div>
 
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit_application_start_date">Application opens</label>
+                        <input type="date" id="edit_application_start_date" class="form-input" disabled>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit_application_end_date">Application closes</label>
+                        <input type="date" id="edit_application_end_date" class="form-input" disabled>
+                    </div>
+                </div>
+                <small class="form-hint" style="margin-bottom:18px;">Application dates can't be changed after the program is posted. Program dates stay editable.</small>
+
                 <div class="form-group">
-                    <label>Description</label>
+                    <label for="edit_nature_of_partnership">Nature of Partnership</label>
+                    <input type="text" name="nature_of_partnership" id="edit_nature_of_partnership" class="form-input" maxlength="255">
+                </div>
+
+                <div class="form-group">
+                    <label for="edit_description">Description</label>
                     <textarea name="description" id="edit_description" class="form-input" required></textarea>
                 </div>
             </div>
@@ -493,7 +842,7 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <div class="modal-icon"><i class="fa fa-graduation-cap"></i></div>
                 <div><h3>Add Program</h3><p class="modal-subtitle">Create a new program.</p></div>
             </div>
-            <button type="button" class="modal-close" data-close="addProgramModal"><i class="fa fa-times"></i></button>
+            <button type="button" class="modal-close" aria-label="Close" data-close="addProgramModal"><i class="fa fa-times"></i></button>
         </div>
 
         <form id="addProgramForm">
@@ -502,23 +851,59 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             <div class="modal-body">
                 <div class="form-group">
-                    <label class="form-label"><i class="fa fa-book"></i> Program Name</label>
-                    <input type="text" name="program_name" class="form-input" required>
+                    <label class="form-label" for="add_program_name"><i class="fa fa-book"></i> Program Name</label>
+                    <input type="text" name="program_name" id="add_program_name" class="form-input" required>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label"><i class="fa fa-tag"></i> Program Type</label>
-                        <select name="program_type" class="form-input" required>
-                            <option value="">Select Program Type</option>
+                        <label class="form-label" for="add_program_types"><i class="fa fa-tag"></i> Program Types</label>
+                        <select name="program_types[]" id="add_program_types" class="form-input" multiple required>
                             <?php foreach ($programTypes as $type): ?>
                                 <option value="<?= h($type['category_name']) ?>"><?= h($type['category_name']) ?></option>
+                            <?php endforeach; ?>
+                            <option value="Others">Others</option>
+                        </select>
+                        <small class="form-hint">Hold Ctrl (or Cmd) to select more than one.</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="add_other_program_type">Other program type (when Others is selected)</label>
+                        <input type="text" name="other_program_type" id="add_other_program_type" class="form-input" maxlength="100">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="add_eligible_campuses">Eligible Campuses</label>
+                        <select name="eligible_campuses[]" id="add_eligible_campuses" class="form-input" multiple required>
+                            <?php foreach ($campusOptions as $campus): ?>
+                                <option value="<?= (int)$campus['id'] ?>"><?= h($campus['campus_name']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label class="form-label"><i class="fa fa-circle-dot"></i> Status</label>
-                        <select name="status" class="form-input" required>
+                        <label class="form-label" for="add_eligible_degree_programs">Eligible Degree Programs</label>
+                        <select name="eligible_degree_programs[]" id="add_eligible_degree_programs" class="form-input" multiple required>
+                            <?php foreach ($degreeProgramOptions as $degree): ?>
+                                <option value="<?= (int)$degree['id'] ?>" data-campus="<?= (int)$degree['campus_id'] ?>"><?= h($degree['program_name'] . ' — ' . $degree['campus_name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="form-hint">Shows degree programs of the selected campuses.</small>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Eligible Participants</label>
+                        <fieldset>
+                            <label><input type="checkbox" name="eligible_participant_types[]" value="student"> Student</label>
+                            <label><input type="checkbox" name="eligible_participant_types[]" value="faculty"> Faculty</label>
+                            <label><input type="checkbox" name="eligible_participant_types[]" value="non-teaching"> Non-teaching</label>
+                        </fieldset>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="add_status"><i class="fa fa-circle-dot"></i> Status</label>
+                        <select name="status" id="add_status" class="form-input" required>
                             <option value="Active">Active</option>
                             <option value="Upcoming">Upcoming</option>
                             <option value="Completed">Completed</option>
@@ -527,39 +912,26 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     </div>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label"><i class="fa fa-users"></i> Eligible Program</label>
-                        <select name="eligible_department" class="form-input" required>
-                            <option value="All Departments">All Departments</option>
-                            <?php foreach ($departmentOptions as $department => $label): ?>
-                                <option value="<?= h($department) ?>"><?= h($label) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label"><i class="fa fa-user-check"></i> Eligible Account Type</label>
-                        <select name="eligible_account_type" class="form-input" required>
-                            <option value="Student">Student</option>
-                            <option value="Faculty">Faculty</option>
-                            <option value="Non-Teaching">Non-Teaching</option>
-                            <option value ="Both">All Applicants</option>
-                        </select>
-                    </div>
+                <div class="form-group">
+                    <label class="form-label" for="add_mobility_direction">Mobility Direction</label>
+                    <select name="mobility_direction" id="add_mobility_direction" class="form-input" required>
+                        <option value="outbound">Outbound</option>
+                        <option value="inbound">Inbound</option>
+                    </select>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label"><i class="fa fa-globe"></i> Country</label>
+                        <label class="form-label" for="add_program_country"><i class="fa fa-globe"></i> Country</label>
                         <select name="country_id" id="add_program_country" class="form-input" required>
                             <option value="">Select Country</option>
                             <?php foreach ($countries as $country): ?>
-                                <option value="<?= h($country['id']) ?>"><?= h($country['country_name']) ?></option>
+                                <option value="<?= (int)$country['id'] ?>"><?= h($country['country_name']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label class="form-label"><i class="fa fa-building"></i> Partner Institution</label>
+                        <label class="form-label" for="add_program_partner"><i class="fa fa-building"></i> Partner Institution</label>
                         <select name="partner_id" id="add_program_partner" class="form-input" required>
                             <option value="">Select Country First</option>
                         </select>
@@ -567,27 +939,46 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label"><i class="fa fa-chair"></i> Available Slots</label>
-                    <input type="number" name="slots" class="form-input" min="0" step="1" value="0" required>
-                    <small style="color:#94a3b8; font-size:11px; margin-top:4px; display:block;">
-                        Maximum number of participants. Enter 0 for unlimited.
-                    </small>
+                    <label class="form-label" for="add_slots"><i class="fa fa-chair"></i> Capacity Ceiling (optional)</label>
+                    <input type="number" name="slots" id="add_slots" class="form-input" min="0" step="1" value="0" required>
+                    <small class="form-hint">Leave at 0 if the partner has not confirmed a ceiling.</small>
+                    <label class="slots-confirm">
+                        <input type="checkbox" name="slots_confirmed" id="add_slots_confirmed" value="1">
+                        Partner has confirmed this ceiling
+                    </label>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label"><i class="fa fa-calendar"></i> Start Date</label>
-                        <input type="date" name="start_date" class="form-input" required>
+                        <label class="form-label" for="add_start"><i class="fa fa-calendar"></i> Program Start Date</label>
+                        <input type="date" name="start_date" id="add_start" class="form-input" required>
                     </div>
                     <div class="form-group">
-                        <label class="form-label"><i class="fa fa-calendar-check"></i> End Date</label>
-                        <input type="date" name="end_date" class="form-input" required>
+                        <label class="form-label" for="add_end"><i class="fa fa-calendar-check"></i> Program End Date</label>
+                        <input type="date" name="end_date" id="add_end" class="form-input" required>
                     </div>
                 </div>
 
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="add_application_start_date">Application opens</label>
+                        <input type="date" name="application_start_date" id="add_application_start_date" class="form-input" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="add_application_end_date">Application closes</label>
+                        <input type="date" name="application_end_date" id="add_application_end_date" class="form-input" required>
+                    </div>
+                </div>
+                <small class="form-hint" style="margin-bottom:18px;">The application closes automatically on its end date and can't be changed after posting.</small>
+
                 <div class="form-group">
-                    <label class="form-label"><i class="fa fa-align-left"></i> Description</label>
-                    <textarea name="description" class="form-input" required></textarea>
+                    <label class="form-label" for="add_nature_of_partnership">Nature of Partnership</label>
+                    <input type="text" name="nature_of_partnership" id="add_nature_of_partnership" class="form-input" maxlength="255">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="add_description"><i class="fa fa-align-left"></i> Description</label>
+                    <textarea name="description" id="add_description" class="form-input" required></textarea>
                 </div>
             </div>
 
@@ -601,18 +992,32 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    const allPartners = <?= json_encode($partners) ?>;
+    const allPartners = <?= json_encode($partners, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+    const csrfToken   = <?= json_encode($csrfToken) ?>;
 
-    // 1. SEARCH
-    document.getElementById('searchInput').addEventListener('input', function () {
-        const search = this.value.toLowerCase().trim();
-        document.querySelectorAll('#tableBody tr').forEach(row => {
-            const name = (row.dataset.name || '').toLowerCase();
-            row.style.display = name.includes(search) ? '' : 'none';
-        });
+    /* 1. SEARCH (server-side, debounced) */
+    const searchInput = document.getElementById('searchInput');
+    let searchTimer = null;
+    function runSearch() {
+        const url = new URL(window.location.href);
+        const q = searchInput.value.trim();
+        if (q) url.searchParams.set('q', q); else url.searchParams.delete('q');
+        url.searchParams.delete('p');
+        window.location.href = url.toString();
+    }
+    searchInput.addEventListener('input', function () {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(runSearch, 500);
     });
+    searchInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); clearTimeout(searchTimer); runSearch(); }
+    });
+    if (searchInput.value) {
+        searchInput.focus();
+        searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length);
+    }
 
-    // 2. MODAL HELPERS
+    /* 2. MODAL HELPERS */
     function openModal(id) {
         document.getElementById(id).classList.add('open');
         document.body.style.overflow = 'hidden';
@@ -621,12 +1026,11 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById(id).classList.remove('open');
         document.body.style.overflow = '';
     }
-
     document.querySelectorAll('[data-close]').forEach(btn => {
-        btn.addEventListener('click', function() { closeModal(this.dataset.close); });
+        btn.addEventListener('click', function () { closeModal(this.dataset.close); });
     });
     document.querySelectorAll('.modal-overlay').forEach(overlay => {
-        overlay.addEventListener('click', function(e) {
+        overlay.addEventListener('click', function (e) {
             if (e.target === this) closeModal(this.id);
         });
     });
@@ -634,24 +1038,20 @@ document.addEventListener('DOMContentLoaded', function () {
         if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.open').forEach(m => closeModal(m.id));
     });
 
-    // 3. POPULATE PARTNER DROPDOWN
+    /* 3. PARTNER DROPDOWN (filtered by country) */
     function populatePartners(countryId, selectId, selectedPartnerId = null) {
         const select = document.getElementById(selectId);
-        select.innerHTML = '<option value="">Select Partner</option>';
-
         if (!countryId) {
             select.innerHTML = '<option value="">Select Country First</option>';
             return;
         }
-
-        const cidStr = String(countryId).trim();
-        const filtered = allPartners.filter(p => String(p.country_id).trim() === cidStr);
-
+        const cid = String(countryId).trim();
+        const filtered = allPartners.filter(p => String(p.country_id).trim() === cid);
         if (filtered.length === 0) {
             select.innerHTML = '<option value="">No partners in this country</option>';
             return;
         }
-
+        select.innerHTML = '<option value="">Select Partner</option>';
         filtered.forEach(p => {
             const opt = document.createElement('option');
             opt.value = p.id;
@@ -661,46 +1061,98 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // 4. ADD PROGRAM
-    document.getElementById('btnAddProgram').addEventListener('click', function() {
+    function parseList(value, fallback) {
+        try {
+            const parsed = JSON.parse(value || '[]');
+            if (Array.isArray(parsed)) return parsed;
+        } catch (error) { /* legacy comma-separated value */ }
+        return fallback ? String(fallback).split(',').map(s => s.trim()).filter(Boolean) : [];
+    }
+
+    function syncDegreeOptions(campusSelect, degreeSelect, selectedIds = []) {
+        const selectedCampuses = new Set(Array.from(campusSelect.selectedOptions, o => o.value));
+        Array.from(degreeSelect.options).forEach(option => {
+            const visible = selectedCampuses.has(option.dataset.campus);
+            option.hidden = !visible;
+            option.disabled = !visible;
+            if (!visible) option.selected = false;
+        });
+        selectedIds.forEach(id => {
+            const option = Array.from(degreeSelect.options).find(o => o.value === String(id));
+            if (option && !option.hidden) option.selected = true;
+        });
+    }
+
+    function selectValues(select, values) {
+        const chosen = new Set(values.map(String));
+        Array.from(select.options).forEach(o => { o.selected = chosen.has(o.value); });
+    }
+
+    const addCampuses  = document.getElementById('add_eligible_campuses');
+    const addDegrees   = document.getElementById('add_eligible_degree_programs');
+    const editCampuses = document.getElementById('edit_eligible_campuses');
+    const editDegrees  = document.getElementById('edit_eligible_degree_programs');
+    addCampuses.addEventListener('change',  () => syncDegreeOptions(addCampuses, addDegrees));
+    editCampuses.addEventListener('change', () => syncDegreeOptions(editCampuses, editDegrees));
+
+    /* 4. ADD PROGRAM */
+    document.getElementById('btnAddProgram').addEventListener('click', function () {
         document.getElementById('addProgramForm').reset();
         document.getElementById('add_program_partner').innerHTML = '<option value="">Select Country First</option>';
+        syncDegreeOptions(addCampuses, addDegrees);
         openModal('addProgramModal');
     });
-
-    document.getElementById('add_program_country').addEventListener('change', function() {
+    document.getElementById('add_program_country').addEventListener('change', function () {
         populatePartners(this.value, 'add_program_partner');
     });
-
-    document.getElementById('addProgramForm').addEventListener('submit', function(e) {
+    document.getElementById('addProgramForm').addEventListener('submit', function (e) {
         e.preventDefault();
-        const start = this.querySelector('[name="start_date"]').value;
-        const end = this.querySelector('[name="end_date"]').value;
-        if (start && end && end < start) {
-            showToast('error', 'End Date cannot be before Start Date.');
-            return;
-        }
+        if (!validateDates(this)) return;
         submitForm(this, 'addProgramModal');
     });
 
-    // 5. EDIT PROGRAM
-    document.getElementById('tableBody').addEventListener('click', function(e) {
-        const editBtn = e.target.closest('.edit-btn');
-        const deleteBtn = e.target.closest('.delete-btn');
+    /* 5. EDIT / DUPLICATE / DELETE */
+    document.getElementById('tableBody').addEventListener('click', function (e) {
+        const editBtn      = e.target.closest('.edit-btn');
+        const deleteBtn    = e.target.closest('.delete-btn');
+        const duplicateBtn = e.target.closest('.duplicate-btn');
 
         if (editBtn) {
             const data = JSON.parse(editBtn.dataset.program);
 
             document.getElementById('edit_id').value = data.id;
-            document.getElementById('edit_program_name').value = data.program_name;
-            document.getElementById('edit_program_type').value = data.program_type;
-            document.getElementById('edit_eligible_department').value = data.eligible_department || 'All Departments';
-            document.getElementById('edit_eligible_account_type').value = data.eligible_account_type || 'Student';
+            document.getElementById('edit_program_name').value = data.program_name || '';
+
+            const typeSelect = document.getElementById('edit_program_types');
+            const types = parseList(data.program_types, data.program_type || '');
+            const knownTypes = new Set(Array.from(typeSelect.options, o => o.value));
+            const customType = types.find(t => !knownTypes.has(t)) || '';
+            const selectedTypes = types.filter(t => knownTypes.has(t));
+            if (customType) selectedTypes.push('Others');
+            selectValues(typeSelect, selectedTypes);
+            document.getElementById('edit_other_program_type').value = customType;
+
+            const participantValues = new Set(parseList(
+                data.eligible_participant_types,
+                data.eligible_account_type === 'Both' ? 'student,faculty' : String(data.eligible_account_type || 'student').toLowerCase()
+            ));
+            document.querySelectorAll('#edit_participant_types input[name="eligible_participant_types[]"]').forEach(input => {
+                input.checked = participantValues.has(input.value);
+            });
+
+            selectValues(editCampuses, parseList(data.eligible_campuses, ''));
+            syncDegreeOptions(editCampuses, editDegrees, parseList(data.eligible_degree_programs, ''));
+
             document.getElementById('edit_status').value = data.status;
+            document.getElementById('edit_mobility_direction').value = data.mobility_direction || 'outbound';
             document.getElementById('edit_slots').value = data.slots ?? 0;
-            document.getElementById('edit_start').value = data.start_date;
-            document.getElementById('edit_end').value = data.end_date;
-            document.getElementById('edit_description').value = data.description;
+            document.getElementById('edit_slots_confirmed').checked = (parseInt(data.slots ?? 0, 10) > 0);
+            document.getElementById('edit_start').value = data.start_date || '';
+            document.getElementById('edit_end').value = data.end_date || '';
+            document.getElementById('edit_application_start_date').value = data.application_start_date || '';
+            document.getElementById('edit_application_end_date').value = data.application_end_date || '';
+            document.getElementById('edit_nature_of_partnership').value = data.nature_of_partnership || '';
+            document.getElementById('edit_description').value = data.description || '';
 
             document.getElementById('edit_program_country').value = data.country_id;
             populatePartners(data.country_id, 'edit_program_partner', data.partner_id);
@@ -708,67 +1160,95 @@ document.addEventListener('DOMContentLoaded', function () {
             openModal('editProgramModal');
         }
 
+        if (duplicateBtn) {
+            if (!confirm('Create a new batch from this program? Its dates will be cleared.')) return;
+
+            const formData = new FormData();
+            formData.append('action', 'duplicate');
+            formData.append('id', duplicateBtn.dataset.id);
+            formData.append('csrf_token', csrfToken);
+
+            fetch(window.location.href, { method: 'POST', body: formData })
+                .then(res => res.json())
+                .then(data => {
+                    showToast(data.success ? 'success' : 'error', data.message);
+                    if (data.success) setTimeout(() => location.reload(), 900);
+                })
+                .catch(() => showToast('error', 'Server error.'));
+        }
+
         if (deleteBtn) {
             if (!confirm('Delete this program? This cannot be undone.')) return;
 
-            const id = deleteBtn.dataset.id;
             const formData = new FormData();
             formData.append('action', 'delete');
-            formData.append('id', id);
-            formData.append('csrf_token', '<?= $csrfToken ?>');
+            formData.append('id', deleteBtn.dataset.id);
+            formData.append('csrf_token', csrfToken);
 
-            fetch('', { method: 'POST', body: formData })
+            fetch(window.location.href, { method: 'POST', body: formData })
                 .then(res => res.json())
                 .then(data => {
-                    if (data.success) {
-                        deleteBtn.closest('tr').remove();
-                        showToast('success', data.message);
-                    } else {
-                        showToast('error', data.message);
-                    }
+                    showToast(data.success ? 'success' : 'error', data.message);
+                    if (data.success) deleteBtn.closest('tr').remove();
                 })
                 .catch(() => showToast('error', 'Server error.'));
         }
     });
 
-    document.getElementById('edit_program_country').addEventListener('change', function() {
+    document.getElementById('edit_program_country').addEventListener('change', function () {
         populatePartners(this.value, 'edit_program_partner');
     });
-
-    document.getElementById('editProgramForm').addEventListener('submit', function(e) {
+    document.getElementById('editProgramForm').addEventListener('submit', function (e) {
         e.preventDefault();
-        const start = this.querySelector('[name="start_date"]').value;
-        const end = this.querySelector('[name="end_date"]').value;
-        if (start && end && end < start) {
-            showToast('error', 'End Date cannot be before Start Date.');
-            return;
-        }
+        if (!validateDates(this)) return;
         submitForm(this, 'editProgramModal');
     });
 
-    // 6. SUBMIT FORM HELPER
+    /* 6. VALIDATION + SUBMIT */
+    function validateDates(form) {
+        const start = form.querySelector('[name="start_date"]').value;
+        const end   = form.querySelector('[name="end_date"]').value;
+        if (start && end && end < start) {
+            showToast('error', 'Program end date cannot be before the start date.');
+            return false;
+        }
+        const aStart = form.querySelector('[name="application_start_date"]');
+        const aEnd   = form.querySelector('[name="application_end_date"]');
+        if (aStart && aEnd && aStart.value && aEnd.value && aEnd.value < aStart.value) {
+            showToast('error', 'Application close date cannot be before the open date.');
+            return false;
+        }
+        return true;
+    }
+
     function submitForm(form, modalId) {
         const btn = form.querySelector('[type="submit"]');
         const original = btn.innerHTML;
         btn.disabled = true;
         btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Saving...';
 
-        fetch('', { method: 'POST', body: new FormData(form) })
+        fetch(window.location.href, { method: 'POST', body: new FormData(form) })
             .then(async res => {
                 const text = await res.text();
                 try { return JSON.parse(text); }
-                catch { throw new Error('Invalid JSON response'); }
+                catch (err) {
+                    console.error('Non-JSON response from server:', text);
+                    throw new Error('Invalid JSON response');
+                }
             })
             .then(data => {
                 showToast(data.success ? 'success' : 'error', data.message);
+                if (data.warning) {
+                    setTimeout(() => showToast('error', data.warning), 500);
+                }
                 if (data.success) {
                     closeModal(modalId);
-                    setTimeout(() => location.reload(), 1000);
+                    setTimeout(() => location.reload(), 900);
                 }
             })
-            .catch((err) => {
-                console.error("Error saving:", err);
-                showToast('error', 'Server error');
+            .catch(err => {
+                console.error('Error saving:', err);
+                showToast('error', 'Server error. Open the browser console to see the response.');
             })
             .finally(() => {
                 btn.disabled = false;
@@ -776,23 +1256,23 @@ document.addEventListener('DOMContentLoaded', function () {
             });
     }
 
-    // 7. TOAST
+    /* 7. TOAST */
     function showToast(type, message) {
         const existing = document.querySelector('.toast');
         if (existing) existing.remove();
 
         const toast = document.createElement('div');
-        toast.className = `toast toast--${type}`;
-        toast.innerHTML = `<i class="fa fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i><span></span>`;
+        toast.className = 'toast toast--' + type;
+        toast.setAttribute('role', 'status');
+        toast.innerHTML = '<i class="fa fa-' + (type === 'success' ? 'check-circle' : 'exclamation-circle') + '"></i><span></span>';
         toast.querySelector('span').textContent = message;
 
         document.body.appendChild(toast);
         requestAnimationFrame(() => toast.classList.add('toast--show'));
-
         setTimeout(() => {
             toast.classList.remove('toast--show');
             setTimeout(() => toast.remove(), 300);
-        }, 3000);
+        }, 3500);
     }
 });
 </script>
