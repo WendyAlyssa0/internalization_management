@@ -1,8 +1,22 @@
 <?php
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/roles.php'; // Includes session_start() automatically
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+/* =========================
+   AUTHENTICATION
+========================= */
+if (!isset($_SESSION['user_id'])) {
+    header('Location: ../public/login.php');
+    exit();
+}
+
+/* =========================
+   AUTHORIZATION
+========================= */
+// Uses the clean helper function from roles.php
+if (!canManageAnnouncements()) {
+    http_response_code(403);
+    exit('Forbidden — you do not have permission to manage announcements.');
 }
 
 $pdo = db();
@@ -19,11 +33,18 @@ $csrfToken = $_SESSION['csrf_token'];
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete') {
     header('Content-Type: application/json');
     
-    // CSRF Check
     if (!isset($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'] ?? '')) {
         echo json_encode(['ok' => false, 'message' => 'Invalid CSRF token']);
         exit();
     }
+
+    // Only Super Admin can delete? If so, uncomment this:
+    /*
+    if (!isSuperAdmin()) {
+        echo json_encode(['ok' => false, 'message' => 'Only a Super Admin can delete records.']);
+        exit();
+    }
+    */
 
     $id = filter_var($_POST['id'] ?? 0, FILTER_VALIDATE_INT);
     if ($id) {
@@ -38,18 +59,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
 /* FETCH */
 $announcements = $pdo->query("
-SELECT
-    id,
-    title,
-    announcement,
-    publish_date,
-    status
-FROM announcements
-ORDER BY publish_date DESC
+    SELECT id, title, announcement, publish_date, status
+    FROM announcements
+    ORDER BY publish_date DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
-<!-- FIXED: Changed to announcements.css -->
+<!-- ... YOUR HTML AND JAVASCRIPT REMAINS EXACTLY THE SAME ... -->
+<!-- (Paste the HTML/JS from the previous step here) -->
+
 <link rel="stylesheet" href="../asset/css/announcement.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
@@ -61,23 +79,17 @@ ORDER BY publish_date DESC
     </div>
 
     <div class="toolbar">
-
         <div class="search-box">
             <i class="fa fa-search"></i>
             <input type="text" id="searchAnnouncement" placeholder="Search announcement...">
         </div>
-
         <button class="create-btn" onclick="openAddModal()">
-            <i class="fa fa-plus"></i>
-            New Announcement
+            <i class="fa fa-plus"></i> New Announcement
         </button>
-
     </div>
 
     <div class="table-card">
-
         <table>
-
             <thead>
                 <tr>
                     <th>Title</th>
@@ -89,31 +101,23 @@ ORDER BY publish_date DESC
             </thead>
 
             <tbody id="announcementTable">
-
-            <?php if(count($announcements)): ?>
-
-                <?php foreach($announcements as $row): ?>
-
-                <tr data-search="<?= strtolower(htmlspecialchars($row['title'].' '.$row['announcement'])) ?>">
-
+            <?php if (count($announcements)): ?>
+                <?php foreach ($announcements as $row): ?>
+                <tr data-search="<?= strtolower(htmlspecialchars($row['title'] . ' ' . $row['announcement'])) ?>">
                     <td style="font-weight:600; color:#0f172a;"><?= htmlspecialchars($row['title']) ?></td>
-
                     <td style="color:#475569;">
-                        <?= htmlspecialchars(substr($row['announcement'],0,100)) ?>
+                        <?= htmlspecialchars(substr($row['announcement'], 0, 100)) ?>
                         <?= strlen($row['announcement']) > 100 ? '...' : '' ?>
                     </td>
-
-                    <td><?= date('M d, Y',strtotime($row['publish_date'])) ?></td>
-
+                    <td><?= date('M d, Y', strtotime($row['publish_date'])) ?></td>
                     <td>
                         <span class="status-badge status-<?= strtolower($row['status']) ?>">
                             <?= htmlspecialchars($row['status']) ?>
                         </span>
                     </td>
-
                     <td>
                         <div class="actions">
-                            <button class="action-btn edit-btn" title="Edit" onclick='openEditModal(<?= json_encode($row) ?>)'>
+                            <button class="action-btn edit-btn" title="Edit" onclick='openEditModal(<?= json_encode($row, JSON_HEX_APOS | JSON_HEX_QUOT) ?>)'>
                                 <i class="fa-solid fa-pen"></i>
                             </button>
                             <button class="action-btn delete-btn" title="Delete" onclick="deleteRecord(<?= (int)$row['id'] ?>)">
@@ -121,27 +125,16 @@ ORDER BY publish_date DESC
                             </button>
                         </div>
                     </td>
-
                 </tr>
-
                 <?php endforeach; ?>
-
             <?php else: ?>
-
                 <tr>
-                    <td colspan="5" class="empty-row">
-                        No announcements found.
-                    </td>
+                    <td colspan="5" class="empty-row">No announcements found.</td>
                 </tr>
-
             <?php endif; ?>
-
             </tbody>
-
         </table>
-
     </div>
-
 </div>
 
 <!-- ===================== ADD / EDIT MODAL ===================== -->
@@ -166,12 +159,12 @@ ORDER BY publish_date DESC
       <div class="modal-body">
         <div class="form-group">
           <label class="form-label" for="title">Title *</label>
-          <input type="text" id="title" name="title" class="form-input" placeholder="e.g. Application Deadline Extended" required>
+          <input type="text" id="title" name="title" class="form-input" placeholder="e.g. Application Deadline Extended" required maxlength="255">
         </div>
 
         <div class="form-group">
           <label class="form-label" for="announcement">Announcement Content *</label>
-          <textarea id="announcement" name="announcement" class="form-input" placeholder="Write your announcement here..." rows="4" required></textarea>
+          <textarea id="announcement" name="announcement" class="form-input" placeholder="Write your announcement here..." rows="4" required maxlength="5000"></textarea>
         </div>
 
         <div class="form-row">
@@ -241,29 +234,26 @@ ORDER BY publish_date DESC
 
   document.addEventListener("DOMContentLoaded", () => {
     const csrfToken = window.ANNOUNCEMENT_CSRF;
-    
-    // Modals
-    const modal = document.getElementById("announcementModal");
-    const deleteModal = document.getElementById("deleteModal");
-    
-    // Form Elements
-    const form = document.getElementById("announcementForm");
-    const formAction = document.getElementById("formAction");
-    const formId = document.getElementById("formId");
-    const submitLabel = document.getElementById("formSubmitLabel");
-    const modalTitle = document.getElementById("modalTitle");
-    const modalSubtitle = document.getElementById("modalSubtitle");
-    const modalIcon = document.getElementById("modalIcon");
 
-    const titleInput = document.getElementById("title");
+    const modal       = document.getElementById("announcementModal");
+    const deleteModal = document.getElementById("deleteModal");
+
+    const form         = document.getElementById("announcementForm");
+    const formAction   = document.getElementById("formAction");
+    const formId       = document.getElementById("formId");
+    const submitLabel  = document.getElementById("formSubmitLabel");
+    const modalTitle   = document.getElementById("modalTitle");
+    const modalSubtitle = document.getElementById("modalSubtitle");
+    const modalIcon    = document.getElementById("modalIcon");
+
+    const titleInput        = document.getElementById("title");
     const announcementInput = document.getElementById("announcement");
-    const dateInput = document.getElementById("publish_date");
-    const statusInput = document.getElementById("status");
+    const dateInput         = document.getElementById("publish_date");
+    const statusInput       = document.getElementById("status");
 
     let deleteId = null;
-    
-    // Toast
-    const toast = document.getElementById("toast");
+
+    const toast        = document.getElementById("toast");
     const toastMessage = document.getElementById("toastMessage");
     let toastTimer = null;
 
@@ -277,10 +267,9 @@ ORDER BY publish_date DESC
       toastTimer = setTimeout(() => toast.classList.remove("toast--show"), 3200);
     }
 
-    // Open/Close Modals
-    const openModal = () => modal.classList.add("open");
-    const closeModal = () => modal.classList.remove("open");
-    const openDeleteModal = () => deleteModal.classList.add("open");
+    const openModal        = () => modal.classList.add("open");
+    const closeModal       = () => modal.classList.remove("open");
+    const openDeleteModal  = () => deleteModal.classList.add("open");
     const closeDeleteModal = () => deleteModal.classList.remove("open");
 
     function resetForm() {
@@ -289,44 +278,45 @@ ORDER BY publish_date DESC
       formAction.value = "save";
     }
 
-    // Add Button
+    /* ---- ADD ---- */
     window.openAddModal = () => {
       resetForm();
-      modalTitle.textContent = "New Announcement";
+      modalTitle.textContent    = "New Announcement";
       modalSubtitle.textContent = "Create a new announcement";
-      modalIcon.className = "fa-solid fa-bullhorn";
-      submitLabel.textContent = "Save Announcement";
-      
-      // Set today's date as default
+      modalIcon.className       = "fa-solid fa-bullhorn";
+      submitLabel.textContent   = "Save Announcement";
+      formAction.value          = "save";
+      formId.value              = "";
+
       dateInput.value = new Date().toISOString().split('T')[0];
 
       openModal();
       titleInput.focus();
     };
 
-    // Edit Button
+    /* ---- EDIT ---- */
     window.openEditModal = (data) => {
       resetForm();
-      formAction.value = "save";
-      formId.value = data.id;
-      titleInput.value = data.title || "";
-      announcementInput.value = data.announcement || "";
-      dateInput.value = data.publish_date || "";
-      statusInput.value = data.status || "draft";
-      
-      modalTitle.textContent = "Edit Announcement";
+      formAction.value          = "save";
+      formId.value              = data.id;
+      titleInput.value          = data.title || "";
+      announcementInput.value   = data.announcement || "";
+      dateInput.value           = data.publish_date || "";
+      statusInput.value         = data.status || "draft";
+
+      modalTitle.textContent    = "Edit Announcement";
       modalSubtitle.textContent = "Update existing announcement";
-      modalIcon.className = "fa-solid fa-pen";
-      submitLabel.textContent = "Update Announcement";
+      modalIcon.className       = "fa-solid fa-pen";
+      submitLabel.textContent   = "Update Announcement";
+
       openModal();
       titleInput.focus();
     };
 
-    // Close buttons
-    document.getElementById("modalClose").onclick = closeModal;
-    document.getElementById("modalCancel").onclick = closeModal;
-    document.getElementById("deleteModalClose").onclick = closeDeleteModal;
-    document.getElementById("deleteCancel").onclick = closeDeleteModal;
+    document.getElementById("modalClose").onclick        = closeModal;
+    document.getElementById("modalCancel").onclick       = closeModal;
+    document.getElementById("deleteModalClose").onclick  = closeDeleteModal;
+    document.getElementById("deleteCancel").onclick      = closeDeleteModal;
 
     [modal, deleteModal].forEach((m) => {
       m.addEventListener("click", (e) => {
@@ -334,24 +324,24 @@ ORDER BY publish_date DESC
       });
     });
 
-    // Submit Form via AJAX
+    /* ---- SUBMIT ---- */
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const submitBtn = document.getElementById("formSubmit");
       submitBtn.disabled = true;
 
       try {
-        // Post to a new save file
         const body = new URLSearchParams(new FormData(form));
-        const res = await fetch('announcement_save.php', { method: "POST", body });
+        const res  = await fetch('announcement_save.php', { method: "POST", body });
         const data = await res.json();
 
         if (!data.ok) {
           showToast(data.message || "Something went wrong.", "error");
           return;
         }
-        
-        showToast(formAction.value === "edit" ? "Announcement updated." : "Announcement created.");
+
+        const isEdit = formId.value !== "";
+        showToast(isEdit ? "Announcement updated." : "Announcement created.");
         setTimeout(() => location.reload(), 700);
       } catch (err) {
         showToast("Network error. Please try again.", "error");
@@ -360,7 +350,7 @@ ORDER BY publish_date DESC
       }
     });
 
-    // Delete Record
+    /* ---- DELETE ---- */
     window.deleteRecord = (id) => {
       deleteId = id;
       openDeleteModal();
@@ -373,9 +363,9 @@ ORDER BY publish_date DESC
 
       try {
         const body = new URLSearchParams({ action: "delete", id: deleteId, csrf_token: csrfToken });
-        const res = await fetch('', { method: "POST", body });
+        const res  = await fetch('', { method: "POST", body });
         const data = await res.json();
-        
+
         if (data.ok) {
           closeDeleteModal();
           showToast("Announcement deleted.");
@@ -392,12 +382,12 @@ ORDER BY publish_date DESC
     });
   });
 
-  // Search
-  document.getElementById("searchAnnouncement").addEventListener("keyup",function(){
-      let value=this.value.toLowerCase();
-      document.querySelectorAll("#announcementTable tr").forEach(row=>{
-          let text=row.dataset.search||"";
-          row.style.display=text.includes(value)?"":"none";
+  /* ---- SEARCH ---- */
+  document.getElementById("searchAnnouncement").addEventListener("keyup", function () {
+      let value = this.value.toLowerCase();
+      document.querySelectorAll("#announcementTable tr").forEach(row => {
+          let text = row.dataset.search || "";
+          row.style.display = text.includes(value) ? "" : "none";
       });
   });
 </script>

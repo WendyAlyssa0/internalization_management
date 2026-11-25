@@ -8,12 +8,18 @@ CREATE TABLE users (
     last_name VARCHAR(100) NOT NULL,
     suffix VARCHAR(20) DEFAULT NULL,
     student_id_number VARCHAR(30) DEFAULT NULL,
+    department VARCHAR(100) DEFAULT NULL,
+    account_type ENUM('Student', 'Faculty') NOT NULL DEFAULT 'Student',
     birthdate DATE DEFAULT NULL,
     sex ENUM('Male', 'Female', 'Prefer not to say') DEFAULT NULL,
     program VARCHAR(150) DEFAULT NULL,
+    year_level VARCHAR(50) DEFAULT NULL,
+    faculty_rank VARCHAR(100) DEFAULT NULL,
+    year_level VARCHAR(50) DEFAULT NULL,
+    faculty_rank VARCHAR(100) DEFAULT NULL,
     email VARCHAR(150) NOT NULL UNIQUE,
     contact VARCHAR(20) DEFAULT NULL,
-    user_role ENUM('super admin', 'admin', 'applicant') DEFAULT 'applicant',
+    user_role ENUM('super admin', 'admin', 'applicant', 'faculty', 'campus coordinator', 'ovplia staff', 'approving official', 'bor secretary') DEFAULT 'applicant',
     status ENUM('active', 'inactive') DEFAULT 'active',
     password_hash VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -77,6 +83,8 @@ CREATE TABLE programs(
 id INT AUTO_INCREMENT PRIMARY KEY,
 program_name VARCHAR(150) NOT NULL,
 program_type VARCHAR(100) NOT NULL,
+eligible_department VARCHAR(100) NOT NULL DEFAULT 'All Departments',
+eligible_account_type ENUM('Student', 'Faculty') NOT NULL DEFAULT 'Student',
 country_id INT,
 partner_id INT,
 agreement_type_id INT,
@@ -128,30 +136,48 @@ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 CREATE TABLE program_requirements (
     id INT AUTO_INCREMENT PRIMARY KEY,
     program_id INT NOT NULL,
-    requirement_name VARCHAR(150) NOT NULL,
+    requirement_id INT NOT NULL,
     is_required BOOLEAN DEFAULT TRUE,
+    form_id INT NULL,
+    requirement_file VARCHAR(255) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_program_requirements_program
         FOREIGN KEY (program_id)
         REFERENCES programs(id)
-        ON DELETE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT fk_program_requirements_requirement
+        FOREIGN KEY (requirement_id)
+        REFERENCES requirements(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_program_requirements_form
+        FOREIGN KEY (form_id)
+        REFERENCES forms(id)
+        ON DELETE SET NULL
 );
-ALTER TABLE program_requirements
-ADD COLUMN form_id INT NULL,
-ADD CONSTRAINT fk_program_requirements_form
-    FOREIGN KEY (form_id)
-    REFERENCES forms(id)
-    ON DELETE SET NULL
-    ON UPDATE CASCADE;
 
-ALTER TABLE program_requirements
-ADD COLUMN requirement_file VARCHAR(255) NULL;
+CREATE TABLE user_documents (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    requirement_id INT NOT NULL,
+    file_path VARCHAR(255) NOT NULL,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_user_document (user_id, requirement_id),
+    CONSTRAINT fk_user_documents_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_user_documents_requirement
+        FOREIGN KEY (requirement_id)
+        REFERENCES program_requirements(id)
+        ON DELETE CASCADE
+) ENGINE=InnoDB;
 
 CREATE TABLE applications (
     id INT AUTO_INCREMENT PRIMARY KEY,
     applicant_id INT NOT NULL,
     program_id INT NULL,
+    reason VARCHAR(500) NULL,
     department VARCHAR(100),
     mobility_type ENUM('Inbound','Outbound') NOT NULL,
     institution VARCHAR(150),

@@ -1,324 +1,314 @@
 <?php
-require_once __DIR__ . '/../config/db.php';
-
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
-$pdo = db();
-
-function e($value)
-{
-    return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
-}
-
-if (!isset($_SESSION['user_id'])) {
-    header('Location: ../public/login.php');
+if (!isset($pdo, $userId) || !($pdo instanceof PDO)) {
+    header('Location: dashboard.php?page=my_applications');
     exit;
 }
 
-$user_id = $_SESSION['user_id'];
+/* Safely get the page variable to prevent undefined errors */
+$currentPage = $page ?? 'my_applications';
 
-// FIXED: Changed a.applicant_id to a.user_id
+/* Schema-safe query */
 $stmt = $pdo->prepare("
     SELECT
-        a.id AS application_id,
-        a.status AS app_status,
-        a.created_at AS date_applied,
-
+        a.id,
+        a.program_id,
+        a.status,
+        a.created_at,
         p.program_name,
         p.start_date,
         p.end_date,
-
-        pr.institution_name AS partner_institution,
-        c.country_name AS country
+        p.partner_id,
+        p.country_id,
+        partner.institution_name AS partner_institution,
+        country.country_name AS country_name
     FROM applications a
-
-    LEFT JOIN programs p
-        ON p.id = a.program_id
-
-    LEFT JOIN partners pr
-        ON pr.id = p.partner_id
-
-    LEFT JOIN countries c
-        ON c.id = p.country_id
-
+    LEFT JOIN programs p ON p.id = a.program_id
+    LEFT JOIN partners partner ON partner.id = p.partner_id
+    LEFT JOIN countries country ON country.id = p.country_id
     WHERE a.applicant_id = ?
-
     ORDER BY a.created_at DESC
 ");
-
-$stmt->execute([$user_id]);
+$stmt->execute([$userId]);
 $applications = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-// Calculate summary counts
-$total = count($applications);
-$pending = count(array_filter($applications, fn($a) => strtolower($a['app_status']) === 'pending'));
-$approved = count(array_filter($applications, fn($a) => strtolower($a['app_status']) === 'approved'));
-$rejected = count(array_filter($applications, fn($a) => strtolower($a['app_status']) === 'rejected'));
 ?>
 
-<link rel="stylesheet" href="../asset/css/my_applications.css">
+<style>
+    /* =====================================================
+       APPLICATIONS LIST STYLES
+       ===================================================== */
+    .app-list {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        margin-top: 24px;
+    }
 
-<div class="content-card">
+    .app-card {
+        background: var(--white);
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius);
+        padding: 24px 32px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: var(--transition);
+        position: relative;
+        overflow: hidden;
+    }
 
+    .app-card:hover {
+        border-color: var(--psu-gold);
+        box-shadow: var(--shadow-card);
+        transform: translateY(-2px);
+    }
+
+    /* Top accent line on hover */
+    .app-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 4px;
+        height: 100%;
+        background: var(--psu-gold);
+        opacity: 0;
+        transition: var(--transition);
+    }
+    .app-card:hover::before {
+        opacity: 1;
+    }
+
+    .app-info {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .app-title {
+        font-family: var(--font-heading);
+        font-size: 1.25rem;
+        font-weight: 800;
+        color: var(--psu-navy);
+    }
+
+    .app-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        font-weight: 500;
+    }
+
+    .app-meta span {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--bg-main);
+        padding: 6px 12px;
+        border-radius: var(--radius-sm);
+    }
+
+    .app-meta i {
+        color: var(--psu-navy);
+        opacity: 0.7;
+    }
+
+    .app-status {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        flex-shrink: 0;
+    }
+
+    /* Status Badges */
+    .status-badge {
+        padding: 8px 16px;
+        border-radius: var(--radius-full);
+        font-size: 0.75rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+    
+    .badge-pending {
+        background: #fffbeb;
+        color: #92400e;
+        border: 1px solid #fde68a;
+    }
+    
+    .badge-approved {
+        background: #ecfdf5;
+        color: #047857;
+        border: 1px solid #a7f3d0;
+    }
+    
+    .badge-rejected {
+        background: #fef2f2;
+        color: #b91c1c;
+        border: 1px solid #fecaca;
+    }
+
+    .btn-view {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 20px;
+        background: var(--bg-main);
+        color: var(--psu-navy);
+        border-radius: var(--radius-sm);
+        font-family: var(--font-heading);
+        font-weight: 700;
+        font-size: 0.85rem;
+        transition: var(--transition);
+        text-decoration: none;
+    }
+
+    .btn-view:hover {
+        background: var(--psu-navy);
+        color: var(--white);
+        box-shadow: 0 4px 12px rgba(11, 26, 48, 0.15);
+    }
+
+    /* Empty State */
+    .empty-state {
+        text-align: center;
+        padding: 60px 24px;
+        background: var(--bg-main);
+        border-radius: var(--radius-lg);
+        border: 2px dashed var(--border-light);
+    }
+
+    .empty-icon {
+        width: 72px;
+        height: 72px;
+        background: var(--white);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 20px;
+        box-shadow: var(--shadow-sm);
+        color: var(--psu-navy);
+        font-size: 1.75rem;
+    }
+
+    .empty-state h4 {
+        font-family: var(--font-heading);
+        font-size: 1.25rem;
+        color: var(--psu-navy);
+        margin-bottom: 8px;
+    }
+
+    .empty-state p {
+        color: var(--text-muted);
+        font-size: 0.95rem;
+        max-width: 400px;
+        margin: 0 auto 24px;
+    }
+
+    .btn-gold {
+        display: inline-flex;
+        padding: 12px 24px;
+        background: var(--psu-gold);
+        color: var(--psu-navy);
+        border-radius: var(--radius-sm);
+        font-family: var(--font-heading);
+        font-weight: 700;
+        transition: var(--transition);
+        text-decoration: none;
+    }
+    .btn-gold:hover {
+        background: var(--psu-gold-light);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(228, 177, 52, 0.3);
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .app-card {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 24px;
+            padding: 24px;
+        }
+        .app-status {
+            width: 100%;
+            justify-content: space-between;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-light);
+        }
+    }
+</style>
+
+<section class="content-card" aria-labelledby="applications-title">
     <div class="page-header">
-        <div class="page-header-icon">
-            <i class="fa-solid fa-folder-open"></i>
-        </div>
         <div>
-            <h2>My Applications</h2>
-            <p>Track the status of all your submitted mobility program applications.</p>
+            <h2 id="applications-title"><?= $currentPage === 'application_status' ? 'Application Status' : 'My Applications' ?></h2>
+            <p>Track the status of your mobility program applications.</p>
         </div>
     </div>
 
-    <?php if (empty($applications)): ?>
-
+    <?php if (!$applications): ?>
         <div class="empty-state">
-            <div class="empty-state-icon">
-                <i class="fa-solid fa-inbox"></i>
+            <div class="empty-icon">
+                <i class="fa-regular fa-file-lines"></i>
             </div>
-            <h3>No applications yet</h3>
-            <p>You haven't applied to any mobility programs. Browse available programs and submit your first application.</p>
-            <a href="?page=available_programs" class="btn-primary">Explore Programs</a>
+            <h4>No applications yet</h4>
+            <p>You haven't applied for any programs yet. Browse our available programs to get started!</p>
+            <a href="?page=available_programs" class="btn-gold">
+                Browse Programs
+            </a>
         </div>
-
     <?php else: ?>
+        <div class="app-list">
+            <?php foreach ($applications as $application):
+                $status = strtolower((string)($application['status'] ?? 'submitted'));
+                $badgeClass = match ($status) {
+                    'approved', 'completed' => 'badge-approved',
+                    'rejected' => 'badge-rejected',
+                    default => 'badge-pending',
+                };
 
-        <!-- SUMMARY BADGES -->
-        <div class="summary-bar">
-            <div class="summary-item active-filter" data-filter="all">
-                <span class="summary-count"><?= $total ?></span>
-                <span class="summary-label">Total</span>
-            </div>
-            <div class="summary-item" data-filter="Pending">
-                <span class="summary-count pending"><?= $pending ?></span>
-                <span class="summary-label">Pending</span>
-            </div>
-            <div class="summary-item" data-filter="Approved">
-                <span class="summary-count approved"><?= $approved ?></span>
-                <span class="summary-label">Approved</span>
-            </div>
-            <div class="summary-item" data-filter="Rejected">
-                <span class="summary-count rejected"><?= $rejected ?></span>
-                <span class="summary-label">Rejected</span>
-            </div>
+                $partnerInst = $application['partner_institution'] ?? null;
+                $countryName = $application['country_name'] ?? null;
+            ?>
+                <div class="app-card">
+                    <div class="app-info">
+                        <div class="app-title"><?= h($application['program_name'] ?? 'Program unavailable') ?></div>
+                        
+                        <div class="app-meta">
+                            <?php if ($partnerInst): ?>
+                                <span><i class="fa-solid fa-building-columns"></i> <?= h($partnerInst) ?></span>
+                            <?php endif; ?>
+                            
+                            <?php if ($countryName): ?>
+                                <span><i class="fa-solid fa-location-dot"></i> <?= h($countryName) ?></span>
+                            <?php endif; ?>
+                            
+                            <?php if (!empty($application['start_date']) && !empty($application['end_date'])): ?>
+                                <span>
+                                    <i class="fa-regular fa-calendar"></i>
+                                    <?= h(date('M j, Y', strtotime($application['start_date']))) ?> – <?= h(date('M j, Y', strtotime($application['end_date']))) ?>
+                                </span>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    
+                    <div class="app-status">
+                        <span class="status-badge <?= $badgeClass ?>">
+                            <?= h(ucwords(str_replace('_', ' ', $status))) ?>
+                        </span>
+                        
+                        <a class="btn-view" href="?page=my_application_detail&id=<?= (int)$application['id'] ?>">
+                            View Details <i class="fa-solid fa-chevron-right" style="font-size: 0.75rem;"></i>
+                        </a>
+                    </div>
+                </div>
+            <?php endforeach; ?>
         </div>
-
-        <!-- APPLICATIONS TABLE -->
-        <div class="table-wrapper">
-            <table class="applications-table">
-                <thead>
-                    <tr>
-                        <th>Program</th>
-                        <th>Partner Institution</th>
-                        <th>Country</th>
-                        <th>Duration</th>
-                        <th>Date Applied</th>
-                        <th>Status</th>
-                        <th>Action</th>
-                    </tr>
-                </thead>
-                <tbody id="applicationsBody">
-                    <?php foreach ($applications as $i => $app): ?>
-                        <tr data-status="<?= ucfirst(strtolower($app['app_status'])) ?>">                            
-                            <td class="program-name-cell">
-                                <?= e($app['program_name']) ?>
-                            </td>
-
-                            <td>
-                                <span class="meta-with-icon">
-                                    <i class="fa-solid fa-building"></i>
-                                    <?= e($app['partner_institution']) ?>
-                                </span>
-                            </td>
-
-                            <td>
-                                <span class="meta-with-icon">
-                                    <i class="fa-solid fa-location-dot"></i>
-                                    <?= e($app['country']) ?>
-                                </span>
-                            </td>
-
-                            <td class="date-range">
-                                <?php if (!empty($app['start_date'])): ?>
-                                    <?= e(date('M j, Y', strtotime($app['start_date']))) ?>
-                                <?php else: ?>
-                                    —
-                                <?php endif; ?>
-
-                                <span class="date-sep">–</span>
-
-                                <?php if (!empty($app['end_date'])): ?>
-                                    <?= e(date('M j, Y', strtotime($app['end_date']))) ?>
-                                <?php else: ?>
-                                    —
-                                <?php endif; ?>
-                            </td>
-
-                            <td class="date-applied">
-                                <?= e(date('M j, Y', strtotime($app['date_applied']))) ?>
-                            </td>
-
-                            <td>
-                                <?php
-                                $status = ucfirst(strtolower($app['app_status']));
-                                $badge_class = match($status) {
-                                    'Approved' => 'badge-approved',
-                                    'Rejected' => 'badge-rejected',
-                                    default    => 'badge-pending',
-                                };
-                                $icon = match($status) {
-                                    'Approved' => 'fa-circle-check',
-                                    'Rejected' => 'fa-circle-xmark',
-                                    default    => 'fa-clock',
-                                };
-                                ?>
-
-                                <span class="status-badge <?= $badge_class ?>">
-                                    <i class="fa-solid <?= $icon ?>"></i>
-                                    <?= e($status) ?>
-                                </span>
-                            </td>
-
-                            <td>
-                                <?php
-                                $jsonApp = htmlspecialchars(
-                                    json_encode($app, JSON_HEX_APOS | JSON_HEX_QUOT),
-                                    ENT_QUOTES,
-                                    'UTF-8'
-                                );
-                                ?>
-                                <button class="btn-view" onclick='openModal(<?= $jsonApp ?>)'>
-                                    <i class="fa-solid fa-eye"></i> View
-                                </button>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-
-            <div class="no-results" id="noResults" style="display:none;">
-                <i class="fa-solid fa-filter-circle-xmark"></i>
-                No applications match this filter.
-            </div>
-        </div>
-
     <?php endif; ?>
-
-</div>
-
-<!-- ===================== MODAL ===================== -->
-<div class="modal-overlay" id="modalOverlay" onclick="closeModal()">
-    <div class="modal" onclick="event.stopPropagation()">
-
-        <div class="modal-header">
-            <div class="modal-header-icon">
-                <i class="fa-solid fa-graduation-cap"></i>
-            </div>
-            <div>
-                <h3 id="modalProgramName"></h3>
-                <p id="modalPartner"></p>
-            </div>
-            <button class="modal-close" onclick="closeModal()">
-                <i class="fa-solid fa-xmark"></i>
-            </button>
-        </div>
-
-        <div class="modal-body">
-            <div class="modal-grid">
-                <div class="modal-field">
-                    <span class="modal-field-label"><i class="fa-solid fa-location-dot"></i> Country</span>
-                    <span class="modal-field-value" id="modalCountry"></span>
-                </div>
-                <div class="modal-field">
-                    <span class="modal-field-label"><i class="fa-solid fa-calendar-days"></i> Start Date</span>
-                    <span class="modal-field-value" id="modalStart"></span>
-                </div>
-                <div class="modal-field">
-                    <span class="modal-field-label"><i class="fa-solid fa-calendar-check"></i> End Date</span>
-                    <span class="modal-field-value" id="modalEnd"></span>
-                </div>
-                <div class="modal-field">
-                    <span class="modal-field-label"><i class="fa-solid fa-clock"></i> Date Applied</span>
-                    <span class="modal-field-value" id="modalDateApplied"></span>
-                </div>
-            </div>
-
-            <div class="modal-field modal-field-full">
-                <span class="modal-field-label"><i class="fa-solid fa-align-left"></i> Program Description</span>
-                <p class="modal-field-text" id="modalDescription"></p>
-            </div>
-
-            <div class="modal-status-row">
-                <span class="modal-field-label"><i class="fa-solid fa-circle-info"></i> Application Status</span>
-                <span class="status-badge" id="modalStatus"></span>
-            </div>
-        </div>
-
-    </div>
-</div>
-
-<script>
-/* ---- FILTER ---- */
-document.querySelectorAll('.summary-item').forEach(item => {
-    item.addEventListener('click', function () {
-        document.querySelectorAll('.summary-item').forEach(el => el.classList.remove('active-filter'));
-        this.classList.add('active-filter');
-
-        const filter = this.dataset.filter;
-        const rows   = document.querySelectorAll('#applicationsBody tr');
-        let visible  = 0;
-
-        rows.forEach(row => {
-            const show = filter === 'all' || row.dataset.status === filter;
-            row.style.display = show ? '' : 'none';
-            if (show) visible++;
-        });
-
-        document.getElementById('noResults').style.display = visible === 0 ? 'flex' : 'none';
-    });
-});
-
-/* ---- MODAL ---- */
-function openModal(app) {
-    document.getElementById('modalProgramName').textContent  = app.program_name || 'N/A';
-    document.getElementById('modalPartner').textContent      = app.partner_institution || 'N/A';
-    document.getElementById('modalCountry').textContent      = app.country || 'N/A';
-    document.getElementById('modalStart').textContent        = formatDate(app.start_date);
-    document.getElementById('modalEnd').textContent          = formatDate(app.end_date);
-    document.getElementById('modalDateApplied').textContent  = formatDate(app.date_applied);
-    document.getElementById('modalDescription').textContent = app.description || 'No description available for this program.';
-    
-    const status = (app.app_status || 'pending').charAt(0).toUpperCase() + (app.app_status || 'pending').slice(1).toLowerCase();
-    const statusEl = document.getElementById('modalStatus');
-    
-    const badgeClass = status === 'Approved' ? 'badge-approved'
-                     : status === 'Rejected' ? 'badge-rejected'
-                     : 'badge-pending';
-    const iconClass  = status === 'Approved' ? 'fa-circle-check'
-                     : status === 'Rejected' ? 'fa-circle-xmark'
-                     : 'fa-clock';
-
-    statusEl.className = 'status-badge ' + badgeClass;
-    statusEl.innerHTML = `<i class="fa-solid ${iconClass}"></i> ${status}`;
-
-    document.getElementById('modalOverlay').classList.add('active');
-    document.body.style.overflow = 'hidden';
-}
-
-function closeModal() {
-    document.getElementById('modalOverlay').classList.remove('active');
-    document.body.style.overflow = '';
-}
-
-function formatDate(dateStr) {
-    if (!dateStr) return '—';
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeModal();
-});
-</script>
+</section>

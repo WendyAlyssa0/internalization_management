@@ -1,272 +1,570 @@
-link rel="stylesheet" href="../asset/css/profile.css">
 <?php
-require_once __DIR__ . '/../config/db.php';
-
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+if (!isset($pdo, $userId, $user) || !($pdo instanceof PDO)) {
+    header('Location: dashboard.php?page=profile');
+    exit;
 }
 
-if (!isset($_SESSION['user_id'])) {
-    header('Location: ../public/user_login.php');
-    exit();
-}
+$departmentOptions = require __DIR__ . '/../config/academic_departments.php';
+$activeTab = $_GET['tab'] ?? 'profile'; // profile, security, danger
 
-$pdo = db();
-$userId = (int)$_SESSION['user_id'];
+$saved = false;
+$errors = [];
+$successMsg = '';
 
-if (!function_exists('h')) {
-    function h($value): string {
-        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
-    }
-}
+/* =========================================================
+   HANDLE FORM SUBMISSIONS
+   ========================================================= */
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!checkCsrf()) {
+        $errors[] = 'Your session expired. Please refresh the page and try again.';
+    } else {
+        $action = $_POST['action'] ?? 'update_profile';
 
-/* =========================
-   FETCH USER DATA
-========================= */
-$stmt = $pdo->prepare("
-    SELECT id, first_name, middle_name, last_name, suffix,
-           email, student_id_number, employee_id_number, program,
-           birthdate, sex, contact, user_role, status, profile_picture, created_at
-    FROM users
-    WHERE id = ?
-    LIMIT 1
-");
-$stmt->execute([$userId]);
-$user = $stmt->fetch(PDO::FETCH_ASSOC);
+        /* --- 1. UPDATE PROFILE --- */
+        if ($action === 'update_profile') {
+            $first     = is_string($_POST['first_name'] ?? null) ? trim($_POST['first_name']) : '';
+            $middle    = is_string($_POST['middle_name'] ?? null) ? trim($_POST['middle_name']) : '';
+            $last      = is_string($_POST['last_name'] ?? null) ? trim($_POST['last_name']) : '';
+            $suffix    = is_string($_POST['suffix'] ?? null) ? trim($_POST['suffix']) : '';
+            $contact   = is_string($_POST['contact'] ?? null) ? trim($_POST['contact']) : '';
+            $birthdate = is_string($_POST['birthdate'] ?? null) ? trim($_POST['birthdate']) : '';
+            $sex       = is_string($_POST['sex'] ?? null) ? $_POST['sex'] : '';
+            $department = is_string($_POST['department'] ?? null) ? $_POST['department'] : '';
 
-if (!$user) {
-    die("User not found.");
-}
-
-$fullName = trim(
-    $user['first_name'] . ' ' . 
-    ($user['middle_name'] ? substr($user['middle_name'], 0, 1) . '. ' : '') . 
-    $user['last_name'] . 
-    ($user['suffix'] ? ' ' . $user['suffix'] : '')
-);
-
-$role = strtolower($user['user_role']);
-$isFaculty = ($role === 'faculty');
-
-$initials = strtoupper(substr($user['first_name'], 0, 1) . substr($user['last_name'], 0, 1));
-
-/* =========================
-   HANDLE AJAX UPDATE
-========================= */
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    header('Content-Type: application/json');
-    
-    try {
-        if ($_POST['action'] === 'update_profile') {
-            $firstName = trim($_POST['first_name'] ?? '');
-            $middleName = trim($_POST['middle_name'] ?? '');
-            $lastName = trim($_POST['last_name'] ?? '');
-            $suffix = trim($_POST['suffix'] ?? '');
-            $contact = trim($_POST['contact'] ?? '');
-            $birthdate = $_POST['birthdate'] ?? null;
-            $sex = $_POST['sex'] ?? null;
-
-            if ($firstName === '' || $lastName === '') {
-                echo json_encode(['success' => false, 'message' => 'First and last name are required.']);
-                exit();
+            if ($first === '') $errors[] = 'First name is required.';
+            if ($last === '')  $errors[] = 'Last name is required.';
+            if (mb_strlen($first) > 100 || mb_strlen($middle) > 100 || mb_strlen($last) > 100) {
+                $errors[] = 'Names must be 100 characters or fewer.';
+            }
+            if (!array_key_exists($department, $departmentOptions)) {
+                $errors[] = 'Select a valid department.';
             }
 
-            /* Handle Profile Picture Upload */
-            $profilePicturePath = $user['profile_picture']; // Keep existing by default
-            if (isset($_FILES['profile_picture']) && $_FILES['profile_picture']['error'] === UPLOAD_ERR_OK) {
-                $file = $_FILES['profile_picture'];
-                $allowed = ['jpg', 'jpeg', 'png', 'webp'];
-                $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-                
-                if (!in_array($ext, $allowed)) {
-                    echo json_encode(['success' => false, 'message' => 'Invalid image type. Use JPG, PNG, or WebP.']);
-                    exit();
-                }
-                if ($file['size'] > 2 * 1024 * 1024) {
-                    echo json_encode(['success' => false, 'message' => 'Image too large. Max 2MB.']);
-                    exit();
-                }
+            if (!$errors) {
+                $stmt = $pdo->prepare("
+                    UPDATE users
+                    SET first_name = ?, middle_name = ?, last_name = ?, suffix = ?,
+                        contact = ?, birthdate = ?, sex = ?, department = ?
+                    WHERE id = ?
+                ");
+                $stmt->execute([
+                    $first, $middle !== '' ? $middle : null, $last, $suffix !== '' ? $suffix : null,
+                    $contact !== '' ? $contact : null, $birthdate !== '' ? $birthdate : null, 
+                    $sex !== '' ? $sex : null, $department, $userId,
+                ]);
 
-                $uploadDir = __DIR__ . '/../uploads/profiles/';
-                if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
-
-                // Delete old image
-                if (!empty($user['profile_picture']) && file_exists(__DIR__ . '/../' . $user['profile_picture'])) {
-                    @unlink(__DIR__ . '/../' . $user['profile_picture']);
-                }
-
-                $filename = "profile_{$userId}_" . time() . "." . $ext;
-                $profilePicturePath = "uploads/profiles/" . $filename;
-
-                if (!move_uploaded_file($file['tmp_name'], $uploadDir . $filename)) {
-                    echo json_encode(['success' => false, 'message' => 'Failed to save image.']);
-                    exit();
-                }
+                $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ?');
+                $stmt->execute([$userId]);
+                $user = $stmt->fetch(PDO::FETCH_ASSOC);
+                $_SESSION['first_name'] = $first;
+                $saved = true;
+                $successMsg = 'Profile updated successfully.';
             }
-
-            $stmt = $pdo->prepare("
-                UPDATE users SET
-                    first_name = ?, middle_name = ?, last_name = ?, suffix = ?,
-                    contact = ?, birthdate = ?, sex = ?, profile_picture = ?
-                WHERE id = ?
-            ");
-            $stmt->execute([
-                $firstName, $middleName ?: null, $lastName, $suffix ?: null,
-                $contact ?: null, $birthdate ?: null, $sex ?: null,
-                $profilePicturePath, $userId
-            ]);
-
-            $_SESSION['first_name'] = $firstName;
-
-            echo json_encode(['success' => true, 'message' => 'Profile updated successfully!']);
-            exit();
         }
-    } catch (PDOException $e) {
-        error_log('Profile update error: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'Database error. Please try again.']);
-        exit();
+
+        /* --- 2. UPDATE PASSWORD --- */
+        if ($action === 'update_password') {
+            $activeTab = 'security';
+            $current = $_POST['current_password'] ?? '';
+            $new     = $_POST['new_password'] ?? '';
+            $confirm = $_POST['confirm_password'] ?? '';
+
+            if ($current === '' || $new === '' || $confirm === '') {
+                $errors[] = 'Please complete all password fields.';
+            } else {
+                $stmt = $pdo->prepare('SELECT password_hash FROM users WHERE id = ?');
+                $stmt->execute([$userId]);
+                $hash = $stmt->fetchColumn();
+
+                if (!is_string($hash) || !password_verify($current, $hash)) {
+                    $errors[] = 'Your current password is incorrect.';
+                } elseif (strlen($new) < 8) {
+                    $errors[] = 'New password must be at least 8 characters long.';
+                } elseif ($new !== $confirm) {
+                    $errors[] = 'New passwords do not match.';
+                } else {
+                    $stmt = $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?');
+                    $stmt->execute([password_hash($new, PASSWORD_DEFAULT), $userId]);
+                    $successMsg = 'Password updated successfully!';
+                }
+            }
+        }
+
+        /* --- 3. DEACTIVATE ACCOUNT --- */
+        if ($action === 'deactivate_account') {
+            $activeTab = 'danger';
+            try {
+                $stmt = $pdo->prepare("UPDATE users SET status = 'inactive' WHERE id = ?");
+                $stmt->execute([$userId]);
+                session_destroy();
+                header('Location: ../public/login.php?msg=account_deactivated');
+                exit;
+            } catch (PDOException $e) {
+                $errors[] = 'Could not deactivate account. Please contact support.';
+            }
+        }
+
+        /* --- 4. DELETE ACCOUNT --- */
+        if ($action === 'delete_account') {
+            $activeTab = 'danger';
+            try {
+                $stmt = $pdo->prepare("DELETE FROM users WHERE id = ?");
+                $stmt->execute([$userId]);
+                session_destroy();
+                header('Location: ../public/login.php?msg=account_deleted');
+                exit;
+            } catch (PDOException $e) {
+                $errors[] = 'Could not delete account. Please contact support.';
+            }
+        }
     }
+}
+
+$fullName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''));
+$initials = strtoupper(substr($user['first_name'] ?? 'A', 0, 1) . substr($user['last_name'] ?? '', 0, 1));
+$profileNotifications = [];
+if (isset($pdo, $userId)) {
+    $notificationStmt = $pdo->prepare("
+        SELECT id, type, title, message, is_read, created_at
+        FROM notifications
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 20
+    ");
+    $notificationStmt->execute([$userId]);
+    $profileNotifications = $notificationStmt->fetchAll(PDO::FETCH_ASSOC);
 }
 ?>
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<style>
+    /* =====================================================
+       PROFILE PAGE STYLES
+       ===================================================== */
+    /* Tabs */
+    .profile-tabs {
+        display: flex;
+        gap: 8px;
+        border-bottom: 1px solid var(--border-light);
+        margin-bottom: 32px;
+        overflow-x: auto;
+    }
+    .profile-tabs::-webkit-scrollbar { height: 0; }
+    
+    .profile-tab {
+        padding: 14px 24px;
+        font-family: var(--font-heading);
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: var(--text-muted);
+        border-bottom: 3px solid transparent;
+        cursor: pointer;
+        transition: var(--transition);
+        white-space: nowrap;
+        text-decoration: none;
+    }
+    .profile-tab:hover { color: var(--psu-navy); }
+    .profile-tab.active { color: var(--psu-navy); border-bottom-color: var(--psu-gold); }
+    .profile-tab.danger-tab { color: #b91c1c; }
+    .profile-tab.danger-tab.active { border-bottom-color: #b91c1c; }
 
-<div class="profile-page">
+    /* Profile Header */
+    .profile-header-card { 
+        display: flex; 
+        align-items: center; 
+        gap: 24px; 
+        margin-bottom: 40px; 
+        padding-bottom: 32px;
+        border-bottom: 1px solid var(--border-light);
+    }
+    
+    .profile-avatar-large {
+        width: 96px; 
+        height: 96px; 
+        border-radius: 50%;
+        background: var(--psu-gold);
+        color: var(--psu-navy); 
+        display: flex; 
+        align-items: center; 
+        justify-content: center;
+        font-size: 2.2rem; 
+        font-family: var(--font-heading); 
+        font-weight: 800;
+        box-shadow: 0 4px 12px rgba(228, 177, 52, 0.3);
+    }
+    
+    .profile-header-info h2 { 
+        font-family: var(--font-heading);
+        font-size: 1.75rem; 
+        color: var(--psu-navy); 
+        margin-bottom: 6px; 
+    }
+    .profile-header-info p { 
+        color: var(--text-muted); 
+        font-size: 0.95rem; 
+        display: flex; 
+        align-items: center; 
+        gap: 8px; 
+        font-weight: 500;
+    }
+    .profile-header-info i { color: var(--psu-gold); }
 
-    <div class="page-header">
-        <h2>My Profile</h2>
-        <p>Manage your personal information and account details.</p>
-    </div>
+    /* Form Grid */
+    .profile-form-grid { 
+        display: grid; 
+        grid-template-columns: repeat(2, 1fr); 
+        gap: 24px; 
+        margin-bottom: 32px; 
+    }
+    .profile-form-group { 
+        display: flex; 
+        flex-direction: column; 
+        gap: 8px;
+    }
+    .profile-form-group.full-width { grid-column: span 2; }
+    
+    .profile-form-group label { 
+        font-size: 0.85rem; 
+        font-weight: 700; 
+        color: var(--psu-navy); 
+    }
+    
+    .input-wrapper {
+        position: relative;
+        display: flex;
+        align-items: center;
+    }
+    
+    .input-wrapper svg {
+        position: absolute;
+        left: 16px;
+        width: 20px;
+        height: 20px;
+        color: var(--text-light);
+        pointer-events: none;
+        transition: var(--transition);
+    }
 
-    <div class="profile-grid">
+    .profile-form-group input, 
+    .profile-form-group select {
+        width: 100%; 
+        padding: 14px 16px 14px 48px; 
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-sm); 
+        font-family: var(--font-body);
+        font-size: 0.95rem; 
+        color: var(--psu-navy); 
+        background: var(--white);
+        transition: var(--transition);
+        outline: none;
+    }
+    
+    .profile-form-group input:focus, 
+    .profile-form-group select:focus {
+        border-color: var(--psu-navy); 
+        box-shadow: 0 0 0 3px rgba(11, 26, 48, 0.08);
+    }
+    
+    .input-wrapper:focus-within svg { color: var(--psu-navy); }
+    
+    .profile-form-group input:disabled { 
+        background: var(--bg-main); 
+        color: var(--text-light); 
+        cursor: not-allowed; 
+        border-color: var(--border-light); 
+    }
 
-        <!-- LEFT: IDENTITY CARD -->
-        <aside class="identity-card">
-            <div class="avatar-wrap">
-                <?php if (!empty($user['profile_picture']) && file_exists(__DIR__ . '/../' . $user['profile_picture'])): ?>
-                    <img src="../<?= h($user['profile_picture']) ?>" alt="Profile" class="avatar-image" id="avatarPreview">
-                <?php else: ?>
-                    <div class="avatar-initials" id="avatarPreview"><?= h($initials) ?></div>
-                <?php endif; ?>
-                <label for="profile_picture_input" class="avatar-upload-btn" title="Change photo">
-                    <i class="ti ti-camera"></i>
-                </label>
-            </div>
+    /* Danger Zone */
+    .danger-zone {
+        border: 1px solid #fecaca;
+        background: #fef2f2;
+        border-radius: var(--radius);
+        padding: 32px;
+        margin-top: 24px;
+    }
+    .danger-zone h3 { 
+        font-family: var(--font-heading);
+        color: #b91c1c; 
+        font-size: 1.25rem; 
+        margin-bottom: 12px; 
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .danger-zone p { 
+        color: #991b1b; 
+        font-size: 0.95rem; 
+        margin-bottom: 24px; 
+        line-height: 1.6;
+    }
+    
+    .danger-actions { display: flex; gap: 16px; flex-wrap: wrap; }
+    
+    .btn-danger-outline {
+        padding: 12px 24px; 
+        border-radius: var(--radius-sm); 
+        font-family: var(--font-heading);
+        font-weight: 700; 
+        font-size: 0.9rem;
+        background: transparent; 
+        border: 2px solid #ef4444; 
+        color: #ef4444; 
+        cursor: pointer; 
+        transition: var(--transition);
+    }
+    .btn-danger-outline:hover { background: #ef4444; color: white; }
+    
+    .btn-danger-solid {
+        padding: 12px 24px; 
+        border-radius: var(--radius-sm); 
+        font-family: var(--font-heading);
+        font-weight: 700; 
+        font-size: 0.9rem;
+        background: #dc2626; 
+        border: 2px solid #dc2626; 
+        color: white; 
+        cursor: pointer; 
+        transition: var(--transition);
+    }
+    .btn-danger-solid:hover { background: #b91c1c; border-color: #b91c1c; }
 
-            <h3><?= h($fullName) ?></h3>
-            <p class="email"><?= h($user['email']) ?></p>
+    /* Utilities */
+    .alert-box { 
+        padding: 16px 20px; 
+        border-radius: var(--radius-sm); 
+        font-size: 0.9rem; 
+        font-weight: 600; 
+        margin-bottom: 24px; 
+        display: flex; 
+        gap: 12px; 
+        align-items: center;
+    }
+    .alert-success { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+    .alert-error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    
+    .btn-save {
+        display: inline-flex; 
+        align-items: center; 
+        justify-content: center;
+        padding: 14px 28px; 
+        background: var(--psu-navy); 
+        color: var(--white); 
+        border: none;
+        border-radius: var(--radius-sm); 
+        font-family: var(--font-heading);
+        font-weight: 700; 
+        font-size: 1rem; 
+        cursor: pointer; 
+        transition: var(--transition);
+        gap: 8px;
+    }
+    .btn-save:hover { 
+        background: var(--psu-blue); 
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(11, 26, 48, 0.15);
+    }
+    
+    @media (max-width: 600px) {
+        .profile-form-grid { grid-template-columns: 1fr; }
+        .profile-form-group.full-width { grid-column: span 1; }
+        .profile-header-card { flex-direction: column; text-align: center; }
+    }
+</style>
 
-            <?php
-                $roleLabel = 'Student';
-                $roleClass = 'student';
-                if ($isFaculty) { $roleLabel = 'Faculty'; $roleClass = 'faculty'; }
-                elseif (in_array($role, ['admin', 'super admin'])) { $roleLabel = 'Administrator'; $roleClass = 'admin'; }
-            ?>
-            <span class="role-badge <?= $roleClass ?>">
-                <i class="ti ti-shield-check"></i> <?= $roleLabel ?>
-            </span>
-
-            <div class="identity-meta">
-                <?php if (!empty($user['student_id_number']) || !empty($user['employee_id_number'])): ?>
-                    <div class="meta-row">
-                        <span>ID Number</span>
-                        <span><?= h($user['student_id_number'] ?: $user['employee_id_number']) ?></span>
-                    </div>
-                <?php endif; ?>
-                
-                <?php if (!empty($user['program'])): ?>
-                    <div class="meta-row">
-                        <span><?= $isFaculty ? 'Department' : 'Program' ?></span>
-                        <span><?= h($user['program']) ?></span>
-                    </div>
-                <?php endif; ?>
-
-                <div class="meta-row">
-                    <span>Member Since</span>
-                    <span><?= date('M Y', strtotime($user['created_at'])) ?></span>
-                </div>
-
-                <div class="meta-row">
-                    <span>Status</span>
-                    <span style="color: #166534;">
-                        <i class="ti ti-circle-check"></i> <?= h(ucfirst($user['status'])) ?>
-                    </span>
-                </div>
-            </div>
-        </aside>
-
-        <!-- RIGHT: EDIT FORM -->
-        <div class="form-card">
-            <form id="profileForm" enctype="multipart/form-data">
-                <input type="hidden" name="action" value="update_profile">
-                <!-- Hidden file input for avatar -->
-                <input type="file" name="profile_picture" id="profile_picture_input" accept="image/jpeg,image/png,image/webp" style="display:none;">
-
-                <h4 class="section-title"><i class="ti ti-user"></i> Personal Information</h4>
-                
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label>First Name *</label>
-                        <input type="text" name="first_name" value="<?= h($user['first_name']) ?>" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Last Name *</label>
-                        <input type="text" name="last_name" value="<?= h($user['last_name']) ?>" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Middle Name</label>
-                        <input type="text" name="middle_name" value="<?= h($user['middle_name']) ?>">
-                    </div>
-                    <div class="form-group">
-                        <label>Suffix</label>
-                        <input type="text" name="suffix" value="<?= h($user['suffix']) ?>" placeholder="e.g. Jr., Sr., III">
-                    </div>
-                    <div class="form-group">
-                        <label>Birthdate</label>
-                        <input type="date" name="birthdate" value="<?= h($user['birthdate']) ?>">
-                    </div>
-                    <div class="form-group">
-                        <label>Sex</label>
-                        <select name="sex">
-                            <option value="">Select...</option>
-                            <option value="male" <?= $user['sex'] === 'male' ? 'selected' : '' ?>>Male</option>
-                            <option value="female" <?= $user['sex'] === 'female' ? 'selected' : '' ?>>Female</option>
-                            <option value="prefer_not_to_say" <?= $user['sex'] === 'prefer_not_to_say' ? 'selected' : '' ?>>Prefer not to say</option>
-                        </select>
-                    </div>
-                </div>
-
-                <h4 class="section-title"><i class="ti ti-address-book"></i> Contact & Academic</h4>
-                
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label>Email Address (Read-only)</label>
-                        <input type="email" value="<?= h($user['email']) ?>" disabled>
-                    </div>
-                    <div class="form-group">
-                        <label>Contact Number</label>
-                        <input type="text" name="contact" value="<?= h($user['contact']) ?>" placeholder="09XXXXXXXXX">
-                    </div>
-                    <div class="form-group full">
-                        <label><?= $isFaculty ? 'Department' : 'Program / Course' ?></label>
-                        <input type="text" value="<?= h($user['program']) ?>" disabled>
-                    </div>
-                </div>
-
-                <div class="form-actions">
-                    <button type="submit" class="btn-save" id="saveBtn">
-                        <i class="ti ti-device-floppy"></i> Save Changes
-                    </button>
-                </div>
-            </form>
+<section class="content-card" aria-labelledby="profile-title">
+    
+    <div class="profile-header-card">
+        <div class="profile-avatar-large"><?= h($initials) ?></div>
+        <div class="profile-header-info">
+            <h2 id="profile-title"><?= h($fullName ?: 'My Account') ?></h2>
+            <p><i class="fa-solid fa-envelope"></i> <?= h($user['email'] ?? 'No email') ?></p>
         </div>
-
     </div>
-</div>
 
-<!-- Toast -->
-<div class="toast" id="toast">
-    <i class="ti ti-circle-check"></i>
-    <span id="toastMessage">Saved.</span>
-</div>
-    <script src="../asset/js/profile.js"></script>
+    <!-- Tabs -->
+    <div class="profile-tabs">
+        <a href="?page=profile&tab=profile" class="profile-tab <?= $activeTab === 'profile' ? 'active' : '' ?>">Personal Info</a>
+        <a href="?page=profile&tab=security" class="profile-tab <?= $activeTab === 'security' ? 'active' : '' ?>">Security</a>
+        <a href="?page=profile&tab=notifications" class="profile-tab <?= $activeTab === 'notifications' ? 'active' : '' ?>">Notifications</a>
+        <a href="?page=profile&tab=danger" class="profile-tab danger-tab <?= $activeTab === 'danger' ? 'active' : '' ?>">Danger Zone</a>
+    </div>
+
+    <?php if ($successMsg): ?>
+        <div class="alert-box alert-success"><i class="fa-solid fa-circle-check"></i> <?= h($successMsg) ?></div>
+    <?php endif; ?>
+    <?php if ($errors): ?>
+        <div class="alert-box alert-error">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            <div><ul style="margin:0; padding-left:16px;"><?php foreach ($errors as $e): ?><li><?= h($e) ?></li><?php endforeach; ?></ul></div>
+        </div>
+    <?php endif; ?>
+
+    <!-- ==========================================
+         TAB 3: NOTIFICATIONS
+         ========================================== -->
+    <?php if ($activeTab === 'notifications'): ?>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+            <?php if (empty($profileNotifications)): ?>
+                <p style="color:var(--text-muted);">No notifications yet.</p>
+            <?php else: ?>
+                <?php foreach ($profileNotifications as $notification): ?>
+                    <div style="padding:16px;border:1px solid var(--border-light);border-radius:12px;background:<?= empty($notification['is_read']) ? '#fffbeb' : 'var(--white)' ?>;">
+                        <strong><?= h($notification['title']) ?></strong>
+                        <p style="margin:6px 0;color:var(--text-muted);"><?= h($notification['message']) ?></p>
+                        <small style="color:var(--text-muted);"><?= h(date('M d, Y g:i A', strtotime($notification['created_at']))) ?></small>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
+
+    <!-- ==========================================
+         TAB 1: PERSONAL INFO
+         ========================================== -->
+    <?php if ($activeTab === 'profile'): ?>
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="<?= h($_SESSION['csrf_token'] ?? '') ?>">
+        <input type="hidden" name="action" value="update_profile">
+        
+        <div class="profile-form-grid">
+            <div class="profile-form-group">
+                <label>First Name *</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <input type="text" name="first_name" maxlength="100" value="<?= h($user['first_name'] ?? '') ?>" required>
+                </div>
+            </div>
+            <div class="profile-form-group">
+                <label>Middle Name</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <input type="text" name="middle_name" maxlength="100" value="<?= h($user['middle_name'] ?? '') ?>">
+                </div>
+            </div>
+            <div class="profile-form-group">
+                <label>Last Name *</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <input type="text" name="last_name" maxlength="100" value="<?= h($user['last_name'] ?? '') ?>" required>
+                </div>
+            </div>
+            <div class="profile-form-group">
+                <label>Suffix</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/></svg>
+                    <input type="text" name="suffix" maxlength="20" value="<?= h($user['suffix'] ?? '') ?>" placeholder="e.g. Jr., III">
+                </div>
+            </div>
+            <div class="profile-form-group">
+                <label>Email Address (Locked)</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>
+                    <input type="email" value="<?= h($user['email'] ?? '') ?>" disabled title="Email cannot be changed">
+                </div>
+            </div>
+            <div class="profile-form-group">
+                <label>Department *</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10l7-5 7 5v11M9 21v-6h6v6"/></svg>
+                    <select name="department" required>
+                        <option value="">Select department</option>
+                        <?php foreach ($departmentOptions as $department => $label): ?>
+                            <option value="<?= h($department) ?>" <?= ($user['department'] ?? '') === $department ? 'selected' : '' ?>><?= h($label) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+            <div class="profile-form-group">
+                <label>Contact Number</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                    <input type="text" name="contact" maxlength="20" value="<?= h($user['contact'] ?? '') ?>">
+                </div>
+            </div>
+            <div class="profile-form-group">
+                <label>Birthdate</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                    <input type="date" name="birthdate" value="<?= h($user['birthdate'] ?? '') ?>">
+                </div>
+            </div>
+            <div class="profile-form-group">
+                <label>Sex</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="10" r="4"/><path d="M12 14v7M8 18h8M19 5l-3 3M17 3l2 2"/></svg>
+                    <select name="sex">
+                        <option value="">Prefer not to specify</option>
+                        <option value="Male" <?= ($user['sex'] ?? '') === 'Male' ? 'selected' : '' ?>>Male</option>
+                        <option value="Female" <?= ($user['sex'] ?? '') === 'Female' ? 'selected' : '' ?>>Female</option>
+                        <option value="Prefer not to say" <?= ($user['sex'] ?? '') === 'Prefer not to say' ? 'selected' : '' ?>>Prefer not to say</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <button type="submit" class="btn-save">
+            <i class="fa-solid fa-floppy-disk"></i> Save Changes
+        </button>
+    </form>
+    <?php endif; ?>
+
+    <!-- ==========================================
+         TAB 2: SECURITY (PASSWORD)
+         ========================================== -->
+    <?php if ($activeTab === 'security'): ?>
+    <form method="post" style="max-width: 500px;">
+        <input type="hidden" name="csrf_token" value="<?= h($_SESSION['csrf_token'] ?? '') ?>">
+        <input type="hidden" name="action" value="update_password">
+        
+        <div class="profile-form-group" style="margin-bottom: 24px;">
+            <label>Current Password</label>
+            <div class="input-wrapper">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                <input type="password" name="current_password" required placeholder="Enter current password">
+            </div>
+        </div>
+        <div class="profile-form-group" style="margin-bottom: 24px;">
+            <label>New Password (min 8 chars)</label>
+            <div class="input-wrapper">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                <input type="password" name="new_password" minlength="8" required placeholder="At least 8 characters">
+            </div>
+        </div>
+        <div class="profile-form-group" style="margin-bottom: 32px;">
+            <label>Confirm New Password</label>
+            <div class="input-wrapper">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                <input type="password" name="confirm_password" minlength="8" required placeholder="Re-type new password">
+            </div>
+        </div>
+        <button type="submit" class="btn-save">
+            <i class="fa-solid fa-shield-halved"></i> Update Password
+        </button>
+    </form>
+    <?php endif; ?>
+
+    <!-- ==========================================
+         TAB 3: DANGER ZONE
+         ========================================== -->
+    <?php if ($activeTab === 'danger'): ?>
+        <div class="danger-zone">
+            <h3><i class="fa-solid fa-triangle-exclamation"></i> Danger Zone</h3>
+            <p>Once you delete your account, there is no going back. All of your applications, documents, and data will be permanently erased. If you just want to take a break, you can deactivate your account instead.</p>
+            
+            <div class="danger-actions">
+                <!-- Deactivate -->
+                <form method="post" onsubmit="return confirm('Are you sure you want to deactivate your account? You can contact support to reactivate it later.');">
+                    <input type="hidden" name="csrf_token" value="<?= h($_SESSION['csrf_token'] ?? '') ?>">
+                    <input type="hidden" name="action" value="deactivate_account">
+                    <button type="submit" class="btn-danger-outline">Deactivate Account</button>
+                </form>
+
+                <!-- Delete -->
+                <form method="post" onsubmit="return confirm('WARNING: This will permanently delete your account and all data. This cannot be undone. Are you absolutely sure?');">
+                    <input type="hidden" name="csrf_token" value="<?= h($_SESSION['csrf_token'] ?? '') ?>">
+                    <input type="hidden" name="action" value="delete_account">
+                    <button type="submit" class="btn-danger-solid">Permanently Delete Account</button>
+                </form>
+            </div>
+        </div>
+    <?php endif; ?>
+
+</section>

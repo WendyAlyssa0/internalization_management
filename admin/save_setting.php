@@ -80,12 +80,17 @@ foreach ($boolKeys as $k) {
 
 /* SMTP password only if user typed something */
 if (!empty($_POST['smtp_password'])) {
-    $new['smtp_password'] = (string)$_POST['smtp_password']; // encrypt at rest if possible
+    // OPTIONAL: If your mailer needs the plaintext to authenticate, 
+    // you must encrypt this using openssl_encrypt instead of hashing.
+    // If you just want to secure it, use password_hash:
+    $new['smtp_password'] = password_hash((string)$_POST['smtp_password'], PASSWORD_DEFAULT);
 }
 
 /* =========================
    UPSERT
 ========================= */
+$pdo = null; // Initialize outside try block for the catch block
+
 try {
     $pdo = db();
     $pdo->beginTransaction();
@@ -108,6 +113,7 @@ try {
             VALUES (?, 'update', 'Updated system settings', NOW())
         ")->execute([(int)$_SESSION['user_id']]);
     } catch (Throwable $auditErr) {
+        // We log the error but don't stop the settings save if auditing fails
         error_log('save_settings audit: ' . $auditErr->getMessage());
     }
 
@@ -118,7 +124,9 @@ try {
         'message' => 'Settings saved successfully.',
     ];
 } catch (Throwable $e) {
-    if ($pdo->inTransaction()) $pdo->rollBack();
+    if ($pdo && $pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
     error_log('save_settings.php: ' . $e->getMessage());
     $_SESSION['settings_flash'] = [
         'type'    => 'error',

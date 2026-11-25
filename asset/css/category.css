@@ -462,7 +462,9 @@
     animation: fadeIn 0.18s ease;
 }
 
-.modal-overlay.visible {
+.modal-overlay.visible,
+.modal-overlay.active,
+.modal-overlay.open {
     display: flex;
 }
 

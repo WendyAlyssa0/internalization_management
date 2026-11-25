@@ -72,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Forgot Password · PSUxIZN</title>
+    <title>Forgot Password · PSU Internationalization</title>
     <link rel="stylesheet" href="../asset/css/login.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
@@ -86,7 +86,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
             <div class="left-content">
                 <div class="left-logo"><img src="../asset/img/psu_logo.png" alt="PSU Logo"></div>
-                <div class="left-title">PSUxIZN</div>
+                <div class="left-title">PSU Internationalization</div>
                 <div class="left-sub">Password Recovery</div>
             </div>
         </div>

@@ -1,4 +1,5 @@
 ﻿<?php
+
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
@@ -10,15 +11,16 @@ $pdo = db();
 /* =========================
    AUTH CHECK
 ========================= */
-if (!isset($_SESSION['username'])) {
+if (!isset($_SESSION['user_id'])) {
     header('Location: ../public/login.php');
     exit();
 }
 
 $currentRole = strtolower(trim($_SESSION['user_role'] ?? ''));
-$allowedRoles = ['super admin', 'admin'];
+$currentRole = str_replace('_', ' ', $currentRole);
+$isSuperAdmin = ($currentRole === 'super admin');
 
-if (!in_array($currentRole, $allowedRoles)) {
+if (!in_array($currentRole, ['super admin', 'admin'], true)) {
     $_SESSION['error'] = 'You are not allowed to access User Management.';
     header('Location: dashboard.php?page=home');
     exit();
@@ -47,14 +49,50 @@ function initials(string $name): string {
 }
 
 /* =========================
+   AUDIT LOG HELPER
+========================= */
+function logAudit(PDO $pdo, int $userId, string $action, string $description): void {
+    try {
+        $pdo->prepare("INSERT INTO audit_trail (user_id, action, description, created_at) VALUES (?, ?, ?, NOW())")
+            ->execute([$userId, $action, $description]);
+    } catch (Throwable $e) {
+        error_log('audit log failed: ' . $e->getMessage());
+    }
+}
+
+/* =========================
    DELETE USER (POST)
 ========================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
     if (!hash_equals($_SESSION['csrf'], $_POST['csrf'] ?? '')) {
         die("Invalid CSRF token");
     }
+    
     $deleteId = (int) $_POST['delete_id'];
-    $pdo->prepare("DELETE FROM users WHERE id = ?")->execute([$deleteId]);
+    
+    // PREVENT DELETING SELF
+    if ($deleteId === (int)$_SESSION['user_id']) {
+        $_SESSION['error'] = 'You cannot delete your own account.';
+        header("Location: dashboard.php?page=users");
+        exit();
+    }
+    
+    // PREVENT ADMIN FROM DELETING SUPER ADMINS
+    $targetStmt = $pdo->prepare("SELECT user_role, CONCAT(first_name, ' ', last_name) as name FROM users WHERE id = ?");
+    $targetStmt->execute([$deleteId]);
+    $target = $targetStmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($target) {
+        if (!$isSuperAdmin && strtolower($target['user_role']) === 'super admin') {
+            $_SESSION['error'] = 'Only a Super Admin can delete another Super Admin.';
+            header("Location: dashboard.php?page=users");
+            exit();
+        }
+        
+        logAudit($pdo, (int)$_SESSION['user_id'], 'delete_user', "Deleted user account #{$deleteId} ({$target['name']})");
+        $pdo->prepare("DELETE FROM users WHERE id = ?")->execute([$deleteId]);
+    }
+
     header("Location: dashboard.php?page=users");
     exit();
 }
@@ -64,15 +102,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
 ========================= */
 $createErrors  = [];
 $createSuccess = false;
-$createdEmail  = '';
-$createdPass   = '';
 
 function generateEmail(string $firstName, string $lastName, string $role): string {
     $prefix = match (strtolower($role)) {
-        'super admin' => 'SA',
-        'admin'       => 'AD',
-        'applicant'   => 'AP',
-        default       => 'US',
+        'super admin' => 'SA', 'admin' => 'AD', 'applicant' => 'AP',
+        'campus coordinator' => 'CC', 'ovplia staff' => 'OS',
+        'approving official' => 'AO', 'bor secretary' => 'BS',
+        default => 'US',
     };
     $first = strtolower(substr($firstName, 0, 1));
     $last  = strtolower(str_replace(' ', '', $lastName));
@@ -92,46 +128,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_create'])) {
     $role          = strtolower(trim($_POST['role'] ?? ''));
     $program       = trim($_POST['program']        ?? '');
     $contact       = trim($_POST['contact']        ?? '');
+    $password      = $_POST['password']            ?? ''; // <-- Added password
 
     if ($firstName === '' || $lastName === '' || $role === '') {
         $createErrors[] = 'Please fill in all required fields.';
     }
-    if (!in_array($role, ['super admin', 'admin', 'applicant'], true)) {
+    
+    if (!in_array($role, [
+        'super admin', 'admin', 'applicant', 'campus coordinator',
+        'ovplia staff', 'approving official', 'bor secretary',
+    ], true)) {
         $createErrors[] = 'Invalid role.';
     }
+
+    // SECURITY: Prevent Admins from creating Super Admins
+    if (!$isSuperAdmin && $role === 'super admin') {
+        $createErrors[] = 'Only a Super Admin can create another Super Admin.';
+    }
+
     if ($role === 'applicant' && $program === '') {
         $createErrors[] = 'Program is required for applicants.';
+    }
+
+    // Validate password
+    if (strlen($password) < 8) {
+        $createErrors[] = 'Password must be at least 8 characters long.';
     }
 
     if (!$createErrors) {
         $createdEmail = generateEmail($firstName, $lastName, $role);
         $check = $pdo->prepare("SELECT id FROM users WHERE email = ? LIMIT 1");
         $check->execute([$createdEmail]);
+        
         if ($check->fetch()) {
             $createErrors[] = 'Generated email already exists. Try a different name.';
         } else {
             try {
-                $createdPass = 'PSU@' . random_int(10000, 99999);
-
                 $pdo->prepare("
                     INSERT INTO users
                         (first_name, middle_name, last_name, extension_name,
                          birthdate, program, email, contact, user_role, status, password_hash, created_at)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                 ")->execute([
-                    $firstName,
-                    $middleName    ?: null,
-                    $lastName,
-                    $extensionName ?: null,
-                    $birthdate     ?: null,
-                    $program       ?: null,
-                    $createdEmail,
-                    $contact       ?: null,
-                    $role,
-                    'active',
-                    password_hash($createdPass, PASSWORD_DEFAULT),
-                    date('Y-m-d H:i:s'),
+                    $firstName, $middleName ?: null, $lastName, $extensionName ?: null,
+                    $birthdate ?: null, $program ?: null, $createdEmail, $contact ?: null,
+                    $role, 'active', password_hash($password, PASSWORD_DEFAULT), date('Y-m-d H:i:s'),
                 ]);
+                
+                $newId = (int)$pdo->lastInsertId();
+                logAudit($pdo, (int)$_SESSION['user_id'], 'create_user', "Created new {$role} account #{$newId} ({$firstName} {$lastName})");
+
                 $createSuccess = true;
                 $_SESSION['csrf'] = bin2hex(random_bytes(32));
             } catch (PDOException $e) {
@@ -168,9 +214,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_edit'])) {
     if ($firstName === '') $editErrors[] = 'First name is required.';
     if ($lastName  === '') $editErrors[] = 'Last name is required.';
     if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) $editErrors[] = 'Valid email is required.';
-    if (!in_array($role, ['super admin', 'admin', 'applicant'], true)) $editErrors[] = 'Invalid role.';
+    if (!in_array($role, [
+        'super admin', 'admin', 'applicant', 'campus coordinator',
+        'ovplia staff', 'approving official', 'bor secretary',
+    ], true)) $editErrors[] = 'Invalid role.';
     if (!in_array($status, ['active', 'inactive'], true)) $editErrors[] = 'Invalid status.';
-    if ($password !== '' && strlen($password) < 6) $editErrors[] = 'Password must be at least 6 characters.';
+    if ($password !== '' && strlen($password) < 8) $editErrors[] = 'Password must be at least 8 characters.';
+
+    // SECURITY: Prevent Admins from promoting someone to Super Admin
+    if (!$isSuperAdmin && $role === 'super admin') {
+        $editErrors[] = 'Only a Super Admin can grant Super Admin privileges.';
+    }
+
+    // SECURITY: Prevent Admins from demoting a Super Admin
+    $targetStmt = $pdo->prepare("SELECT user_role FROM users WHERE id = ?");
+    $targetStmt->execute([$editId]);
+    $targetRole = strtolower((string)$targetStmt->fetchColumn());
+    if (!$isSuperAdmin && $targetRole === 'super admin') {
+        $editErrors[] = 'Only a Super Admin can edit another Super Admin.';
+    }
 
     if (empty($editErrors)) {
         $check = $pdo->prepare("SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1");
@@ -203,6 +265,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_edit'])) {
         }
 
         $pdo->prepare($sql)->execute($params);
+        logAudit($pdo, (int)$_SESSION['user_id'], 'update_user', "Updated user account #{$editId} ({$firstName} {$lastName})");
+        
         $editSuccess = true;
         $_SESSION['csrf'] = bin2hex(random_bytes(32));
     }
@@ -216,6 +280,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_edit'])) {
     $stmt   = $pdo->prepare("SELECT * FROM users WHERE id = ? LIMIT 1");
     $stmt->execute([$editId]);
     $editUser = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    // SECURITY: Block Admins from opening the edit modal for a Super Admin
+    if ($editUser && !$isSuperAdmin && strtolower($editUser['user_role']) === 'super admin') {
+        $_SESSION['error'] = 'Only a Super Admin can edit another Super Admin.';
+        header("Location: dashboard.php?page=users");
+        exit();
+    }
 }
 
 $reopenCreateModal = ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_create']));
@@ -237,11 +308,19 @@ $stmt->execute();
 $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
+<!-- HTML and CSS remains the same -->
 <link rel="stylesheet" href="../asset/css/users.css">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
 <div class="content">
+
+    <?php if (isset($_SESSION['error'])): ?>
+        <div class="error-box" style="margin-bottom:20px;">
+            <i class="fa-solid fa-circle-exclamation"></i> <?= h($_SESSION['error']) ?>
+        </div>
+        <?php unset($_SESSION['error']); ?>
+    <?php endif; ?>
 
     <div class="page-header">
         <h2>User Management</h2>
@@ -258,6 +337,10 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <option value="admin">Admin</option>
             <option value="super admin">Super Admin</option>
             <option value="applicant">Applicant</option>
+            <option value="campus coordinator">Campus Coordinator</option>
+            <option value="ovplia staff">OVPLIA Staff</option>
+            <option value="approving official">Approving Official</option>
+            <option value="bor secretary">BOR Secretary</option>
         </select>
         <button class="create-btn" id="openModalBtn">
             <i class="fa fa-plus"></i> Add Account
@@ -404,12 +487,7 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <div class="success-box">
                     <div><strong><i class="fa-solid fa-circle-check"></i> Account created successfully!</strong></div>
                     <div class="success-detail">
-                        Email: <strong><?= h($createdEmail) ?></strong>
-                        &nbsp;·&nbsp;
-                        Temporary password: <strong><?= h($createdPass) ?></strong>
-                    </div>
-                    <div class="success-note">
-                        Share this password with the user securely — it will not be shown again.
+                        The user can now log in using their email and the password you set.
                     </div>
                 </div>
             <?php endif; ?>
@@ -454,7 +532,15 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <label>System Role <span class="required">*</span></label>
                         <select name="role" id="roleSelect" required>
                             <?php
-                            $roles        = ['super admin' => 'Super Admin', 'admin' => 'Admin', 'applicant' => 'Applicant'];
+                            $roles = [
+                                'super admin' => 'Super Admin',
+                                'admin' => 'Admin',
+                                'applicant' => 'Applicant',
+                                'campus coordinator' => 'Campus Coordinator',
+                                'ovplia staff' => 'OVPLIA Staff',
+                                'approving official' => 'Approving Official',
+                                'bor secretary' => 'BOR Secretary',
+                            ];
                             $selectedCRole = $_POST['role'] ?? '';
                             foreach ($roles as $val => $label):
                             ?>
@@ -486,14 +572,20 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     </div>
                 </div>
 
-                <div class="form-section-title">Account Email</div>
+                <div class="form-section-title">Account Security</div>
                 <div class="form-grid">
                     <div class="form-group col-12">
                         <label>Generated Email Preview</label>
                         <input type="text" id="emailPreview" readonly placeholder="Fill in name and role to preview">
                         <p class="form-instructions">
                             The email is generated automatically from the role and name, and cannot be edited.
-                            A temporary password will be created and shown once after the account is added.
+                        </p>
+                    </div>
+                    <div class="form-group col-12">
+                        <label>Initial Password <span class="required">*</span></label>
+                        <input type="password" name="password" required minlength="8" placeholder="Minimum 8 characters">
+                        <p class="form-instructions">
+                            Set a secure initial password. Share this with the user so they can log in.
                         </p>
                     </div>
                 </div>
@@ -587,7 +679,15 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <label>System Role <span class="required">*</span></label>
                         <select name="edit_role" required>
                             <?php
-                            $roles        = ['super admin' => 'Super Admin', 'admin' => 'Admin', 'applicant' => 'Applicant'];
+                            $roles = [
+                                'super admin' => 'Super Admin',
+                                'admin' => 'Admin',
+                                'applicant' => 'Applicant',
+                                'campus coordinator' => 'Campus Coordinator',
+                                'ovplia staff' => 'OVPLIA Staff',
+                                'approving official' => 'Approving Official',
+                                'bor secretary' => 'BOR Secretary',
+                            ];
                             $selectedRole = $_POST['edit_role'] ?? ($editUser['user_role'] ?? '');
                             foreach ($roles as $val => $label):
                             ?>
@@ -713,7 +813,15 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
         var l = lEl.value.trim();
         var r = rEl.value;
         if (!f || !l || !r) { preview.value = ''; return; }
-        var prefix = { 'super admin': 'SA', 'admin': 'AD', 'applicant': 'AP' }[r] || 'US';
+        var prefix = {
+            'super admin': 'SA',
+            'admin': 'AD',
+            'applicant': 'AP',
+            'campus coordinator': 'CC',
+            'ovplia staff': 'OS',
+            'approving official': 'AO',
+            'bor secretary': 'BS'
+        }[r] || 'US';
         preview.value = prefix + f[0].toLowerCase() + l.toLowerCase().replace(/\s/g, '') + '@psuxizn.com';
     }
 

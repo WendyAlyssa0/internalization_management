@@ -1,7 +1,18 @@
 ﻿<?php
 ob_start();
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/roles.php'; 
 
+if (!isset($_SESSION['user_id'])) {
+    header('Location: ../public/login.php');
+    exit();
+}
+
+if (!canManagePartners()) {
+    http_response_code(403);
+    exit('Forbidden — you do not have permission to manage countries and addresses.');
+}
+    
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
@@ -43,6 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $action = $_POST['action'];
 
     if ($action === 'add' || $action === 'edit') {
+        // CHANGED: Accept the typed country name directly
         $country  = trim((string)($_POST['country_name'] ?? ''));
         $region   = trim((string)($_POST['region'] ?? ''));
         $province = trim((string)($_POST['province'] ?? ''));
@@ -128,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     exit();
 }
 
-/* FETCH */
+/* FETCH PAGINATION */
 $totalCount = (int)$pdo->query("SELECT COUNT(*) FROM countries_addresses")->fetchColumn();
 $totalPages = max(1, ceil($totalCount / $limit));
 
@@ -149,7 +161,7 @@ $countries = $stmt->fetchAll(PDO::FETCH_ASSOC);
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
-<!-- INLINE CSS: GUARANTEED TO LOAD -->
+<!-- INLINE CSS (Unchanged) -->
 <style>
     :root {
         --color-primary: #0f2044; --color-primary-hover: #162c55; --color-accent: #2563eb;
@@ -305,10 +317,10 @@ $countries = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <?php else: ?>
           <tr>
               <td colspan="7">
-                  <div class="empty-state">
-                      <div class="empty-state-icon"><i class="fa-solid fa-earth-americas"></i></div>
-                      <h3>No Countries Found</h3>
-                      <p>No country and address records have been added yet.</p>
+                  <div class="empty-state" style="text-align:center; padding:40px;">
+                      <div class="empty-state-icon" style="font-size:2rem; color:#94a3b8; margin-bottom:12px;"><i class="fa-solid fa-earth-americas"></i></div>
+                      <h3 style="margin-bottom:6px; color:#0f172a;">No Countries Found</h3>
+                      <p style="color:#64748b; font-size:0.85rem;">No country and address records have been added yet.</p>
                   </div>
               </td>
           </tr>
@@ -366,7 +378,8 @@ $countries = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <div class="form-row">
           <div class="form-group">
             <label class="form-label" for="country_name"><i class="fa-solid fa-flag"></i> Country Name *</label>
-            <input type="text" id="country_name" name="country_name" class="form-input" placeholder="e.g. Philippines" required maxlength="100">
+            <!-- CHANGED: Reverted to text input -->
+            <input type="text" id="country_name" name="country_name" class="form-input" placeholder="e.g. Japan" required maxlength="100">
           </div>
           <div class="form-group">
             <label class="form-label" for="region"><i class="fa-solid fa-map"></i> Region *</label>
@@ -429,7 +442,7 @@ $countries = $stmt->fetchAll(PDO::FETCH_ASSOC);
   window.COUNTRIES_CSRF = <?= json_encode($csrfToken) ?>;
 </script>
 
-<!-- INLINE JS: GUARANTEED TO WORK -->
+<!-- INLINE JS -->
 <script>
 document.addEventListener("DOMContentLoaded", () => {
   const csrfToken = window.COUNTRIES_CSRF;
@@ -444,7 +457,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const formId = document.getElementById("formId");
   const submitLabel = document.getElementById("formSubmitLabel");
 
-  const countryInput = document.getElementById("country_name");
+  const countryInput = document.getElementById("country_name"); // Reverted to input
   const regionInput = document.getElementById("region");
   const provinceInput = document.getElementById("province");
   const cityInput = document.getElementById("city");
@@ -503,12 +516,15 @@ document.addEventListener("DOMContentLoaded", () => {
       resetForm();
       formAction.value = "edit";
       formId.value = editBtn.dataset.id;
+      
+      // Populate the text input directly
       countryInput.value = editBtn.dataset.country || "";
       regionInput.value = editBtn.dataset.region || "";
       provinceInput.value = editBtn.dataset.province || "";
       cityInput.value = editBtn.dataset.city || "";
       postalInput.value = editBtn.dataset.postal || "";
       addressInput.value = editBtn.dataset.address || "";
+      
       modalTitle.textContent = "Edit Country / Address";
       modalSubtitle.textContent = "Update existing record";
       modalIcon.className = "fa-solid fa-pen";

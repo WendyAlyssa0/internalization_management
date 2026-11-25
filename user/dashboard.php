@@ -1,433 +1,841 @@
 <?php
-/**
- * Home dashboard content.
- *
- * Included from home.php, which already ran session_start(), auth checks,
- * and set $userId, $firstName before requiring this file. Database access
- * goes through the db() helper defined in config/db.php.
- */
+declare(strict_types=1);
+ob_start();
+require_once __DIR__ . '/../config/db.php';
 
-// Safeguard for editor false positives
-$userId = $userId ?? (int) ($_SESSION['user_id'] ?? 0);
-
-$dbError           = null;
-$totalApplications = 0;
-$inReview          = 0;
-$pending           = 0;
-$approved          = 0;
-$rejected          = 0;
-$latestApplication = null;
-$programs          = [];
-$notifications     = [];
-$requirements      = [];
-$deadlines         = [];
-
-$stepNames = ['Submitted', 'Under Review', 'Approved', 'Completed'];
-
-$statusIcons = [
-    'completed'   => 'fa-circle-check',
-    'in_progress' => 'fa-clock',
-    'pending'     => 'fa-circle-dot',
-    'not_started' => 'fa-circle-xmark',
-];
-
-$statusColors = [
-    'completed'   => 'var(--green)',
-    'in_progress' => 'var(--orange)',
-    'pending'     => 'var(--gray-400)', 
-    'not_started' => 'var(--red)',
-];
-
-$statusLabels = [
-    'completed'   => 'Completed',
-    'in_progress' => 'In Progress',
-    'pending'     => 'Pending',
-    'not_started' => 'Not Started',
-];
-
-$noticeIcons = ['fa-file-lines', 'fa-circle-check', 'fa-bullhorn', 'fa-bell'];
-
-try {
-    // Status counts across every application this user owns
-    $stmt = db()->prepare(
-        'SELECT status, COUNT(*) AS total
-         FROM applications
-         WHERE user_id = :uid
-         GROUP BY status'
-    );
-    $stmt->execute([':uid' => $userId]);
-
-    foreach ($stmt->fetchAll() as $row) {
-        $count = (int) $row['total'];
-        $totalApplications += $count;
-
-        match ($row['status']) {
-            'submitted', 'in_review' => $inReview += $count,
-            'pending'                => $pending  += $count,
-            'approved', 'completed'  => $approved += $count,
-            'rejected'               => $rejected += $count,
-            default                  => null,
-        };
-    }
-
-    // Most recently updated application, with its program info
-    $stmt = db()->prepare(
-        'SELECT a.id, a.application_code, a.status, a.progress_step, a.updated_at,
-                p.title AS program_title, p.country, p.image AS program_image
-         FROM applications a
-         JOIN programs p ON p.id = a.program_id
-         WHERE a.user_id = :uid
-         ORDER BY a.updated_at DESC
-         LIMIT 1'
-    );
-    $stmt->execute([':uid' => $userId]);
-    $latestApplication = $stmt->fetch() ?: null;
-
-    if ($latestApplication) {
-        $stmt = db()->prepare(
-            'SELECT label, status
-             FROM application_requirements
-             WHERE application_id = :aid
-             ORDER BY id ASC'
-        );
-        $stmt->execute([':aid' => $latestApplication['id']]);
-        $requirements = $stmt->fetchAll();
-    }
-
-    // Open programs the applicant hasn't applied to yet
-    $stmt = db()->prepare(
-        "SELECT title, country, term, type, image
-         FROM programs
-         WHERE status = 'open'
-           AND id NOT IN (SELECT program_id FROM applications WHERE user_id = :uid)
-         ORDER BY application_deadline ASC
-         LIMIT 4"
-    );
-    $stmt->execute([':uid' => $userId]);
-    $programs = $stmt->fetchAll();
-
-    // Recent notifications
-    $stmt = db()->prepare(
-        'SELECT title, message, is_read, created_at
-         FROM notifications
-         WHERE user_id = :uid
-         ORDER BY created_at DESC
-         LIMIT 4'
-    );
-    $stmt->execute([':uid' => $userId]);
-    $notifications = $stmt->fetchAll();
-
-    // Upcoming deadlines (shared across all applicants)
-    $today = date('Y-m-d');
-    $stmt = db()->prepare(
-        'SELECT title, description, due_date
-         FROM deadlines
-         WHERE due_date >= :today
-         ORDER BY due_date ASC
-         LIMIT 3'
-    );
-    $stmt->execute([':today' => $today]);
-    $deadlines = $stmt->fetchAll();
-    
-} catch (PDOException $e) {
-    error_log('[dashboard] ' . $e->getMessage());
-    $dbError = 'We could not load some of your dashboard data. Please refresh in a moment.';
+if (session_status() === PHP_SESSION_NONE) session_start();
+if (empty($_SESSION['user_id'])) {
+    header('Location: ../public/login.php');
+    exit;
 }
 
-/* ---------------------------------------------------------------------
- * Derived display values
- * ------------------------------------------------------------------- */
+require __DIR__ . '/download_handler.php';
 
-$latestStatus = $latestApplication['status'] ?? null;
 
-$progressMap   = ['submitted' => 0, 'in_review' => 1, 'approved' => 2, 'completed' => 3];
-$progressIndex = $progressMap[$latestStatus] ?? -1;
+$pdo    = db();
+$userId = (int)$_SESSION['user_id'];
 
-$applicationImage = $latestApplication['program_image'] ?? '../asset/img/program_placeholder.jpg';
-
-$doneCount = 0;
-foreach ($requirements as $r) {
-    if (strtolower($r['status']) === 'completed') {
-        $doneCount++;
-    }
+/* Load full user row */
+$stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
+$stmt->execute([$userId]);
+$user = $stmt->fetch(PDO::FETCH_ASSOC);
+if (!$user) {
+    session_destroy();
+    header('Location: ../public/login.php');
+    exit;
 }
 
-$overallProgress = count($requirements) > 0
-    ? (int) round(($doneCount / count($requirements)) * 100)
-    : 0;
+/* Whitelist of pages */
+$routes = [
+    'home'                  => 'home.php',
+    'available_programs'    => 'available_programs.php',
+    'program_detail'        => 'program_detail.php',
+    'apply'                 => 'apply.php',
+    'my_applications'       => 'my_applications.php',
+    'application_status'    => 'my_applications.php',
+    'my_application_detail' => 'my_application_detail.php',
+    'documents'             => 'documents.php',
+    'forms_requirements'    => 'documents.php',
+    'partner_directory'     => 'partner_directory.php',
+    'mobility_schedule'     => 'mobility_schedule.php',
+    'notifications'         => 'notifications.php',
+    'profile'               => 'profile.php',
+    'settings'              => 'profile.php',
+];
 
-// Build a conic-gradient for the donut straight from the live counts.
-if ($totalApplications > 0) {
-    $segments = [
-        ['value' => $inReview, 'color' => '#ee9916'],
-        ['value' => $pending,  'color' => '#7250c5'],
-        ['value' => $approved, 'color' => '#309548'],
-        ['value' => $rejected, 'color' => '#e84545'],
-    ];
+$page  = is_string($_GET['page'] ?? null) ? $_GET['page'] : 'home';
+if (!isset($routes[$page])) {
+    $page = 'home';
+}
+$route = $routes[$page];
 
-    $stops  = [];
-    $cursor = 0;
-
-    foreach ($segments as $seg) {
-        if ($seg['value'] <= 0) {
-            continue;
-        }
-        $start   = $cursor;
-        $cursor += ($seg['value'] / $totalApplications) * 360;
-        $stops[] = "{$seg['color']} {$start}deg {$cursor}deg";
-    }
-
-    $donutGradient = $stops !== []
-        ? 'conic-gradient(' . implode(', ', $stops) . ')'
-        : 'conic-gradient(#e8edf5 0deg 360deg)';
-} else {
-    $donutGradient = 'conic-gradient(#e8edf5 0deg 360deg)';
+/* CSRF token */
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
-// Greeting + date
-date_default_timezone_set('Asia/Manila');
-$hour    = (int) date('G');
-$greeting = $hour < 12 ? 'morning' : ($hour < 18 ? 'afternoon' : 'evening');
-$today   = date('l, F j, Y');
+/* Shared helpers */
+function h($v): string { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
+function checkCsrf(): bool {
+    return isset($_POST['csrf_token'], $_SESSION['csrf_token'])
+        && hash_equals($_SESSION['csrf_token'], (string)$_POST['csrf_token']);
+}
 
-$e = static fn ($v) => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
+/* Stream authorized document downloads */
+$downloadType = is_string($_GET['download_type'] ?? null) ? $_GET['download_type'] : '';
+if (in_array($page, ['documents', 'forms_requirements'], true) && $downloadType !== '') {
+    $itemId = (int)($_GET['id'] ?? $_GET['req'] ?? 0);
+    $storedPath = false;
+    $disposition = 'inline';
+
+    if ($downloadType === 'user_doc') {
+        $stmt = $pdo->prepare('SELECT file_path FROM user_documents WHERE user_id = ? AND requirement_id = ? LIMIT 1');
+        $stmt->execute([$userId, $itemId]);
+        $storedPath = $stmt->fetchColumn();
+    } elseif ($downloadType === 'template') {
+        $stmt = $pdo->prepare("
+            SELECT pr.requirement_file
+            FROM program_requirements pr
+            INNER JOIN applications a ON a.program_id = pr.program_id
+            WHERE pr.id = ? AND a.applicant_id = ? AND a.status = 'approved'
+            LIMIT 1
+        ");
+        $stmt->execute([$itemId, $userId]);
+        $storedPath = $stmt->fetchColumn();
+        $disposition = 'attachment';
+    } elseif ($downloadType === 'managed_form') {
+        $stmt = $pdo->prepare("
+            SELECT file_path
+            FROM forms
+            WHERE id = ? AND status = 'active' AND file_path LIKE 'uploads/forms/%'
+            LIMIT 1
+        ");
+        $stmt->execute([$itemId]);
+        $storedPath = $stmt->fetchColumn();
+        $disposition = 'attachment';
+    } else {
+        http_response_code(400);
+        exit('Invalid download request.');
+    }
+
+    $relativePath = is_string($storedPath) ? str_replace('\\', '/', $storedPath) : '';
+    if ($relativePath === '' || str_starts_with($relativePath, '/') || preg_match('~(^|/)\.\.(/|$)~', $relativePath)) {
+        http_response_code(404);
+        exit('File not found.');
+    }
+
+    $uploadsRoot = realpath(__DIR__ . '/../uploads');
+    $fullPath = realpath(__DIR__ . '/../' . $relativePath);
+    if ($uploadsRoot === false || $fullPath === false || !str_starts_with($fullPath, $uploadsRoot . DIRECTORY_SEPARATOR) || !is_file($fullPath)) {
+        http_response_code(404);
+        exit('File not found.');
+    }
+
+    $mimeType = (new finfo(FILEINFO_MIME_TYPE))->file($fullPath) ?: 'application/octet-stream';
+    ob_clean();
+    header('Content-Type: ' . $mimeType);
+    header('Content-Disposition: ' . $disposition . '; filename="' . basename($fullPath) . '"');
+    header('X-Content-Type-Options: nosniff');
+    readfile($fullPath);
+    exit;
+}
+
+$userName = trim((string)($user['first_name'] ?? 'Applicant'));
+
+/* Fetch recent notifications + unread count */
+$stmt = $pdo->prepare("SELECT id, title, message, is_read, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 5");
+$stmt->execute([$userId]);
+$recentNotifs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$stmt = $pdo->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0");
+$stmt->execute([$userId]);
+$unreadCount = (int)$stmt->fetchColumn();
+
+$pageStyles = [
+    'available_programs' => ['available_programs.css'],
+    'program_detail' => ['apply.css'],
+    'apply' => ['apply.css'],
+    'my_applications' => ['my_applications.css'],
+    'application_status' => ['my_applications.css'],
+    'my_application_detail' => ['my_applications.css'],
+    'profile' => ['profile.css'],
+    'settings' => ['apply.css'],
+];
 ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PSU Internationalization — Applicant Portal</title>
+    
+    <!-- Fonts & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    
+    <!-- External CSS -->
+    <link rel="stylesheet" href="../asset/css/user_accessibility.css">
+    <link rel="stylesheet" href="../asset/css/upload_docs.css">
+    <link rel="stylesheet" href="../asset/css/notifications.css">
+    <?php foreach ($pageStyles[$page] ?? [] as $stylesheet): ?>
+        <link rel="stylesheet" href="../asset/css/<?= h($stylesheet) ?>">
+    <?php endforeach; ?>
 
-<section class="dashboard">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-    <!-- Greeting -->
-    <div class="dash-greeting">
-        <div>
-            <h1>Good <?= $greeting ?>, <?= $e($firstName) ?>!</h1>
-            <p>Find an international opportunity for your future.</p>
-        </div>
-        <div class="greeting-date">
-            <i class="fa-regular fa-calendar"></i>
-            <span><?= $e($today) ?></span>
-        </div>
-    </div>
+    <style>
+        /* =====================================================
+           1. CORE VARIABLES & RESET (Matched to Auth Pages)
+           ===================================================== */
+        :root {
+            --psu-navy: #0b1a30;
+            --psu-blue: #1c3d6e;
+            --psu-gold: #e4b134;
+            
+            --bg-main: #eef2f7;
+            --white: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --text-light: #94a3b8;
+            
+            --border-light: #e2e8f0;
+            --radius-sm: 8px;
+            --radius: 12px;
+            --radius-lg: 20px;
+            
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow-card: 0 20px 40px -10px rgba(11, 26, 48, 0.1), 0 0 0 1px rgba(11, 26, 48, 0.02);
+            
+            --font-heading: 'Plus Jakarta Sans', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            
+            --sidebar-w: 272px;
+            --topbar-h: 72px;
+        }
 
-    <!-- STAT STRIP -->
-    <div class="stat-strip">
-        <a class="stat-pill" href="?page=my_applications">
-            <span class="pill-icon blue"><i class="fa-solid fa-file-lines"></i></span>
-            <div>
-                <b><?= $totalApplications ?></b>
-                <small>My Applications</small>
-                <span class="stat-trend up"><i class="fa-solid fa-arrow-trend-up"></i> Active</span>
-            </div>
-        </a>
-        <a class="stat-pill" href="?page=reports">
-            <span class="pill-icon orange"><i class="fa-solid fa-clock"></i></span>
-            <div>
-                <b><?= $inReview ?></b>
-                <small>In Review</small>
-                <span class="stat-trend neutral">Pending Action</span>
-            </div>
-        </a>
-        <a class="stat-pill" href="?page=reports">
-            <span class="pill-icon green"><i class="fa-solid fa-circle-check"></i></span>
-            <div>
-                <b><?= $approved ?></b>
-                <small>Approved</small>
-                <span class="stat-trend up"><i class="fa-solid fa-arrow-trend-up"></i> Successful</span>
-            </div>
-        </a>
-        <a class="stat-pill" href="?page=reports">
-            <span class="pill-icon purple"><i class="fa-solid fa-hourglass-half"></i></span>
-            <div>
-                <b><?= $pending ?></b>
-                <small>Pending</small>
-                <span class="stat-trend neutral">Awaiting Docs</span>
-            </div>
-        </a>
-        <a class="stat-pill" href="?page=reports">
-            <span class="pill-icon red"><i class="fa-solid fa-circle-xmark"></i></span>
-            <div>
-                <b><?= $rejected ?></b>
-                <small>Rejected</small>
-                <span class="stat-trend down"><i class="fa-solid fa-arrow-trend-down"></i> Action Needed</span>
-            </div>
-        </a>
-    </div>
-
-    <!-- CRITICAL WRAPPER: RESTORED -->
-    <div class="dash-main">
+        *, *::before, *::after { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; height: 100%; }
         
-        <!-- LEFT COLUMN -->
-        <div class="dash-left">
+        body.applicant-portal {
+            font-family: var(--font-body);
+            background-color: var(--bg-main);
+            /* Subtle map pattern to match auth pages */
+            background-image: url('data:image/svg+xml;utf8,<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path d="M10 10h80v80H10z" fill="none" stroke="%23cbd5e1" stroke-width="0.5" opacity="0.3"/></svg>');
+            background-size: 800px;
+            background-position: center;
+            color: var(--text-main);
+            -webkit-font-smoothing: antialiased;
+            line-height: 1.5;
+            display: flex;
+            min-height: 100vh;
+        }
 
-            <!-- Application tracker -->
-            <section class="panel tracker-panel">
-                <?php if ($latestApplication): ?>
-                    <div class="panel-head">
-                        <div>
-                            <h2>Latest Application</h2>
-                            <p>Track your progress step by step</p>
-                        </div>
-                        <span class="status-pill <?= in_array($latestStatus, ['approved', 'completed'], true) ? 'ok' : ($latestStatus === 'rejected' ? 'no' : '') ?>">
-                            <?= $e(ucwords(str_replace('_', ' ', $latestStatus === 'submitted' ? 'in review' : $latestStatus))) ?>
-                        </span>
+        a { color: inherit; text-decoration: none; }
+        button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit; }
+        img { max-width: 100%; display: block; }
+        
+        h1, h2, h3, h4 { 
+            font-family: var(--font-heading); 
+            color: var(--psu-navy); 
+            margin: 0; 
+            line-height: 1.2; 
+            letter-spacing: -0.02em; 
+        }
+        p { margin: 0; }
+
+        /* Skip link */
+        .skip-link {
+            position: absolute; left: -9999px; top: auto;
+            background: var(--psu-gold); color: var(--psu-navy);
+            padding: 10px 16px; border-radius: 0 0 8px 0; z-index: 999; font-weight: 700;
+        }
+        .skip-link:focus { left: 0; top: 0; }
+
+        /* =====================================================
+           2. SIDEBAR
+           ===================================================== */
+        .sidebar {
+            position: fixed;
+            top: 0; left: 0;
+            width: var(--sidebar-w);
+            height: 100vh;
+            overflow-y: auto;
+            background: var(--psu-navy);
+            /* Subtle grid pattern */
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            color: var(--text-light);
+            display: flex;
+            flex-direction: column;
+            padding: 24px 16px 20px;
+            z-index: 40;
+            border-right: 1px solid rgba(255,255,255,0.05);
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .sidebar::-webkit-scrollbar { width: 4px; }
+        .sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 999px; }
+
+        .brand { display: flex; align-items: center; gap: 12px; padding: 4px 8px 24px; border-bottom: 1px solid rgba(255,255,255,.08); margin-bottom: 20px; }
+        .brand strong { display: block; font-family: var(--font-heading); font-size: 1.1rem; letter-spacing: .05em; color: var(--psu-gold); }
+        .brand b { display: block; font-size: .85rem; font-weight: 700; letter-spacing: .02em; color: var(--white); }
+        .brand small { display: block; font-size: .65rem; letter-spacing: .1em; color: rgba(255,255,255,.5); margin-top: 4px; text-transform: uppercase; }
+
+        .sidebar-nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+        .nav-section { font-size: .65rem; font-weight: 700; letter-spacing: .12em; color: rgba(255,255,255,.4); margin: 20px 12px 8px; text-transform: uppercase; }
+        .nav-section:first-child { margin-top: 0; }
+        .nav-link { position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: var(--radius-sm); font-size: .88rem; font-weight: 500; color: #cbd5e1; transition: var(--transition); border: 1px solid transparent; }
+        .nav-link i { width: 18px; text-align: center; font-size: .95rem; opacity: .8; transition: var(--transition); color: var(--text-light); }
+        .nav-link span { flex: 1; }
+        .nav-link em { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: var(--psu-gold); color: var(--psu-navy); font-size: .7rem; font-weight: 800; font-style: normal; }
+        .nav-link:hover { background: rgba(255,255,255,.06); color: var(--white); }
+        .nav-link:hover i { opacity: 1; color: var(--psu-gold); }
+        .nav-link.active { background: rgba(255, 255, 255, 0.1); color: var(--white); font-weight: 600; border-color: rgba(255, 255, 255, 0.1); }
+        .nav-link.active i { color: var(--psu-gold); opacity: 1; }
+
+        /* =====================================================
+           3. MAIN CONTENT AREA
+           ===================================================== */
+        main.container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            width: calc(100% - var(--sidebar-w));
+            margin-left: var(--sidebar-w);
+            transition: margin-left 0.3s ease, width 0.3s ease;
+        }
+
+        .topbar {
+            position: sticky; top: 0; z-index: 30;
+            height: var(--topbar-h);
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 16px;
+            padding: 0 32px;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-light);
+        }
+        
+        .topbar-left { display: flex; align-items: center; gap: 16px; }
+        
+        .sidebar-toggle {
+            display: none;
+            width: 40px; height: 40px;
+            border-radius: var(--radius-sm);
+            background: var(--bg-main);
+            color: var(--psu-navy);
+            align-items: center; justify-content: center;
+            transition: background 0.2s;
+        }
+        .sidebar-toggle:hover { background: var(--border-light); }
+
+        .topbar-title {
+            font-family: var(--font-heading);
+            font-weight: 800;
+            font-size: 1.15rem;
+            color: var(--psu-navy);
+            letter-spacing: -0.01em;
+        }
+
+        .topbar-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        /* Notification Bell */
+        .notif-wrapper { position: relative; }
+        .notification-bell {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            background: var(--white);
+            border: 1px solid var(--border-light);
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            transition: var(--transition);
+        }
+        .notification-bell:hover {
+            background: var(--bg-main);
+            color: var(--psu-navy);
+            border-color: var(--psu-navy);
+        }
+        .notification-bell .badge {
+            position: absolute;
+            top: -4px; right: -4px;
+            min-width: 20px; height: 20px;
+            padding: 0 6px;
+            border-radius: 999px;
+            background: #ef4444;
+            color: #fff;
+            font-size: 0.65rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid var(--white);
+        }
+
+        /* Notifications Dropdown */
+        .notif-dropdown {
+            position: absolute;
+            top: calc(100% + 12px);
+            right: 0;
+            width: 340px;
+            background: var(--white);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-card);
+            border: 1px solid var(--border-light);
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-8px);
+            transition: var(--transition);
+            z-index: 100;
+            overflow: hidden;
+        }
+        .notif-wrapper.open .notif-dropdown {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+        .notif-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-light);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--bg-main);
+        }
+        .notif-header h4 { font-size: 0.95rem; font-weight: 700; color: var(--psu-navy); }
+        .notif-header a { font-size: 0.75rem; font-weight: 600; color: var(--psu-gold); }
+        .notif-header a:hover { text-decoration: underline; }
+        
+        .notif-list { max-height: 320px; overflow-y: auto; padding: 8px; }
+        .notif-item {
+            display: flex; gap: 12px; padding: 12px; border-radius: var(--radius-sm);
+            transition: background 0.2s;
+        }
+        .notif-item:hover { background: var(--bg-main); }
+        .notif-item.unread { background: rgba(228, 177, 52, 0.05); }
+        .notif-icon {
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; font-size: 0.85rem;
+        }
+        .notif-icon.blue { background: #eff6ff; color: #2563eb; }
+        .notif-icon.green { background: #f0fdf4; color: #16a34a; }
+        .notif-icon.gold { background: #fefce8; color: var(--psu-gold); }
+        .notif-icon.red { background: #fef2f2; color: #dc2626; }
+        
+        .notif-body { flex: 1; min-width: 0; }
+        .notif-body strong { display: block; font-size: 0.85rem; font-weight: 600; color: var(--psu-navy); margin-bottom: 2px; }
+        .notif-body p { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .notif-body small { display: block; font-size: 0.7rem; color: var(--text-light); margin-top: 4px; }
+        .notif-empty { padding: 32px 16px; text-align: center; color: var(--text-light); }
+        .notif-empty i { font-size: 1.5rem; margin-bottom: 8px; opacity: 0.5; }
+        .notif-empty p { font-size: 0.85rem; }
+
+        /* =====================================================
+           4. USER DROPDOWN MENU
+           ===================================================== */
+        .user-dropdown-wrapper {
+            position: relative;
+        }
+
+        .topbar .user {
+            display: flex; 
+            align-items: center; 
+            gap: 12px;
+            padding: 6px 16px 6px 6px;
+            border-radius: 999px;
+            background: var(--white);
+            border: 1px solid var(--border-light);
+            transition: var(--transition);
+            cursor: pointer;
+            font-family: var(--font-body);
+            text-align: left;
+        }
+        .topbar .user:hover { 
+            border-color: var(--psu-navy); 
+            box-shadow: var(--shadow-sm); 
+        }
+
+        .user-avatar {
+            width: 36px; 
+            height: 36px; 
+            border-radius: 50%;
+            display: grid; 
+            place-items: center;
+            background: var(--psu-gold);
+            color: var(--psu-navy);
+            font-family: var(--font-heading);
+            font-weight: 800;
+            font-size: 0.95rem;
+            flex-shrink: 0;
+        }
+        
+        .user-info { 
+            display: flex; 
+            flex-direction: column; 
+            line-height: 1.2; 
+        }
+        .user-name { 
+            font-family: var(--font-heading); 
+            font-weight: 700; 
+            font-size: 0.85rem; 
+            color: var(--psu-navy); 
+        }
+        .user-role { 
+            font-size: 0.7rem; 
+            font-weight: 500; 
+            color: var(--text-muted); 
+        }
+
+        .dropdown-chevron {
+            font-size: 0.75rem;
+            color: var(--text-light);
+            margin-left: 4px;
+            transition: transform 0.2s;
+        }
+        
+        .user-dropdown-wrapper.open .dropdown-chevron {
+            transform: rotate(180deg);
+        }
+
+        .user-dropdown-menu {
+            position: absolute;
+            top: calc(100% + 10px);
+            right: 0;
+            width: 240px;
+            background: var(--white);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-card);
+            border: 1px solid var(--border-light);
+            padding: 8px;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-8px);
+            transition: var(--transition);
+            z-index: 100;
+        }
+        
+        .user-dropdown-wrapper.open .user-dropdown-menu {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        .dropdown-header {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border-light);
+            margin-bottom: 6px;
+            display: flex;
+            flex-direction: column;
+        }
+        .dropdown-header strong {
+            font-size: 0.9rem;
+            font-family: var(--font-heading);
+            color: var(--psu-navy);
+        }
+        .dropdown-header small {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            transition: var(--transition);
+        }
+        .dropdown-item i {
+            width: 16px;
+            text-align: center;
+            color: var(--text-light);
+            font-size: 0.95rem;
+        }
+        
+        .dropdown-item:hover {
+            background: var(--bg-main);
+            color: var(--psu-navy);
+        }
+        .dropdown-item:hover i {
+            color: var(--psu-navy);
+        }
+
+        .dropdown-item.text-danger { color: #dc2626; }
+        .dropdown-item.text-danger i { color: #dc2626; }
+        .dropdown-item.text-danger:hover { background: #fef2f2; }
+        
+        .dropdown-divider {
+            height: 1px;
+            background: var(--border-light);
+            margin: 6px 4px;
+        }
+
+        .page-body {
+            flex: 1;
+            padding: 32px;
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* =====================================================
+           5. GLOBAL PAGE STYLES (Cards, Alerts, etc.)
+           ===================================================== */
+        .content-card {
+            background: var(--white);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-card);
+            padding: 32px;
+            width: 100%;
+        }
+        
+        .page-header { margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; }
+        .page-header h2 { font-size: 1.5rem; font-weight: 800; color: var(--psu-navy); margin-bottom: 4px; }
+        .page-header p { color: var(--text-muted); font-size: 0.95rem; }
+
+        /* Dashboard specific */
+        .dashboard-wrapper { display: flex; flex-direction: column; gap: 24px; width: 100%; }
+        .welcome-header { margin-bottom: 8px; }
+        .welcome-header h2 { font-size: 1.75rem; font-weight: 800; color: var(--psu-navy); margin-bottom: 4px; }
+        .welcome-header p { color: var(--text-muted); font-size: 0.95rem; }
+        
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+        
+        .stat-card { 
+            background: var(--white); 
+            border: 1px solid var(--border-light); 
+            border-radius: var(--radius); 
+            padding: 20px; 
+            display: flex; 
+            align-items: center; 
+            gap: 16px; 
+            transition: var(--transition); 
+            box-shadow: var(--shadow-sm); 
+        }
+        .stat-card:hover { 
+            border-color: var(--psu-gold); 
+            box-shadow: var(--shadow-card); 
+            transform: translateY(-2px); 
+        }
+        
+        .stat-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; flex-shrink: 0; }
+        .stat-icon.blue { background: #eff6ff; color: #2563eb; }
+        .stat-icon.gold { background: #fefce8; color: var(--psu-gold); }
+        .stat-icon.green { background: #f0fdf4; color: #16a34a; }
+        .stat-icon.red { background: #fef2f2; color: #dc2626; }
+        
+        .stat-content { display: flex; flex-direction: column; }
+        .stat-value { font-family: var(--font-heading); font-size: 1.5rem; font-weight: 800; color: var(--psu-navy); line-height: 1.1; }
+        .stat-label { font-size: 0.8rem; font-weight: 500; color: var(--text-muted); margin-top: 4px; }
+        
+        .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        .chart-card { 
+            background: var(--white); 
+            border: 1px solid var(--border-light); 
+            border-radius: var(--radius); 
+            padding: 24px; 
+            box-shadow: var(--shadow-sm); 
+            display: flex; 
+            flex-direction: column; 
+        }
+        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .chart-header h3 { font-size: 1rem; font-weight: 700; color: var(--psu-navy); }
+        .chart-container { position: relative; flex: 1; min-height: 220px; width: 100%; }
+
+        .alert { padding: 16px; border-radius: var(--radius-sm); font-size: 0.9rem; font-weight: 600; display: flex; align-items: center; gap: 10px; margin-bottom: 24px; }
+        .alert-success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+        .alert-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+        .alert-warning { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+
+        /* =====================================================
+           6. RESPONSIVE
+           ===================================================== */
+        @media (max-width: 1024px) {
+            :root { --sidebar-w: 240px; }
+            .topbar { padding: 0 20px; }
+            .page-body { padding: 24px 20px; }
+            .charts-grid { grid-template-columns: 1fr; }
+        }
+
+        @media (max-width: 860px) {
+            main.container { width: 100%; margin-left: 0; }
+            .sidebar-toggle { display: inline-flex; }
+            .topbar { padding: 0 16px; }
+            .page-body { padding: 20px 16px; }
+            .topbar-title { font-size: 1rem; }
+            .content-card { padding: 24px; }
+            
+            .sidebar { transform: translateX(-100%); box-shadow: var(--shadow-lg); }
+            .sidebar.is-open { transform: translateX(0); }
+            body.sidebar-open::after { content: ""; position: fixed; inset: 0; background: rgba(10,31,68,.5); backdrop-filter: blur(2px); z-index: 35; }
+            
+            .notif-dropdown { position: fixed; top: var(--topbar-h); left: 16px; right: 16px; width: auto; }
+            .user-dropdown-menu { position: fixed; top: var(--topbar-h); left: 16px; right: 16px; width: auto; }
+        }
+
+        @media (max-width: 520px) {
+            .user-info { display: none; }
+            .topbar .user { padding: 6px; }
+            .dropdown-chevron { display: none; }
+            .stat-grid { grid-template-columns: 1fr; }
+            .notification-bell { width: 38px; height: 38px; }
+        }
+    </style>
+</head>
+<body class="applicant-portal">
+
+<a class="skip-link" href="#mainContent">Skip to main content</a>
+<?php include __DIR__ . '/sidebar.php'; ?>
+
+<main class="container" id="mainContent">
+    <header class="topbar">
+        <div class="topbar-left">
+            <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Open menu" aria-controls="mainSidebar" aria-expanded="false">
+                <i class="fa-solid fa-bars"></i>
+            </button>
+            <div class="topbar-title"><?= h(ucwords(str_replace('_', ' ', $page))) ?></div>
+        </div>
+        
+        <div class="topbar-actions">
+            <!-- Notification Bell -->
+            <div class="notif-wrapper" id="notifWrapper">
+                <button class="notification-bell" id="notifToggle" type="button" aria-label="View notifications" aria-expanded="false">
+                    <i class="fa-regular fa-bell"></i>
+                    <?php if ($unreadCount > 0): ?>
+                        <span class="badge"><?= $unreadCount > 9 ? '9+' : $unreadCount ?></span>
+                    <?php endif; ?>
+                </button>
+                
+                <div class="notif-dropdown" id="notifDropdown">
+                    <div class="notif-header">
+                        <h4>Notifications</h4>
+                        <a href="?page=notifications">View all</a>
                     </div>
-
-                    <div class="tracker-hero">
-                        <img class="tracker-photo" src="<?= $e($applicationImage) ?>" alt="<?= $e($latestApplication['program_title']) ?> destination">
-                        <div class="tracker-info">
-                            <strong><?= $e($latestApplication['program_title']) ?></strong>
-                            <div class="tracker-tags">
-                                <span><i class="fa-solid fa-location-dot"></i> <?= $e($latestApplication['country']) ?></span>
-                                <span><i class="fa-solid fa-hashtag"></i> <?= $e($latestApplication['application_code'] ?? $latestApplication['id'] ?? 'N/A') ?></span>
+                    <div class="notif-list">
+                        <?php if (!empty($recentNotifs)): ?>
+                            <?php foreach ($recentNotifs as $n): ?>
+                                <a href="?page=notifications" class="notif-item <?= empty($n['is_read']) ? 'unread' : '' ?>">
+                                    <div class="notif-icon <?= !empty($n['is_read']) ? 'blue' : 'gold' ?>">
+                                        <i class="fa-regular fa-bell"></i>
+                                    </div>
+                                    <div class="notif-body">
+                                        <strong><?= h($n['title']) ?></strong>
+                                        <p><?= h($n['message'] ?? '') ?></p>
+                                        <small><?= date('M d, g:i A', strtotime($n['created_at'])) ?></small>
+                                    </div>
+                                </a>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div class="notif-empty">
+                                <i class="fa-regular fa-bell-slash"></i>
+                                <p>No notifications yet.</p>
                             </div>
-                        </div>
+                        <?php endif; ?>
                     </div>
+                </div>
+            </div>
 
-                    <div class="step-track">
-                        <?php for ($i = 0; $i < 4; $i++): ?>
-                            <?php $cls = $i < $progressIndex ? 'done' : ($i === $progressIndex ? 'current' : ''); ?>
-                            <div class="step <?= $cls ?>">
-                                <div class="step-dot"><i class="fa-solid <?= $i < $progressIndex ? 'fa-check' : ($i === $progressIndex ? 'fa-hourglass-half' : 'fa-circle') ?>"></i></div>
-                                <div class="step-bar <?= $i < $progressIndex ? 'done' : '' ?>"></div>
-                                <div class="step-name"><?= $e($stepNames[$i]) ?></div>
-                            </div>
-                        <?php endfor; ?>
+            <!-- User Profile Dropdown -->
+            <div class="user-dropdown-wrapper" id="userDropdownWrapper">
+                <button class="user" id="userDropdownToggle" type="button" aria-expanded="false">
+                    <span class="user-avatar" aria-hidden="true"><?= h(strtoupper(substr($userName, 0, 1))) ?></span>
+                    <span class="user-info">
+                        <span class="user-name"><?= h($userName) ?></span>
+                        <span class="user-role">Applicant</span>
+                    </span>
+                    <i class="fa-solid fa-chevron-down dropdown-chevron"></i>
+                </button>
+
+                <div class="user-dropdown-menu" id="userDropdownMenu">
+                    <div class="dropdown-header">
+                        <strong><?= h($userName) ?></strong>
+                        <small><?= h($user['email'] ?? 'Applicant') ?></small>
                     </div>
-
-                    <a class="btn-outline" href="?page=reports">
-                        View Application Status <i class="fa-solid fa-arrow-right"></i>
+                    
+                    <a href="?page=profile&tab=profile" class="dropdown-item">
+                        <i class="fa-regular fa-user"></i> My Profile
                     </a>
-                <?php else: ?>
-                    <div class="panel-head">
-                        <div><h2>Latest Application</h2><p>You haven't started one yet</p></div>
-                    </div>
-                    <div class="empty-state">
-                        <i class="fa-regular fa-compass"></i>
-                        <p>No applications on file. Browse open programs to get started.</p>
-                        <a class="btn-outline" href="?page=available_programs">Explore Programs <i class="fa-solid fa-arrow-right"></i></a>
-                    </div>
-                <?php endif; ?>
-            </section>
-
-            <!-- Available programs -->
-            <section class="panel">
-                <div class="panel-head">
-                    <div><h2>Explore Programs</h2><p>Open for application</p></div>
-                    <a href="?page=available_programs" class="panel-link">Browse all <i class="fa-solid fa-arrow-right"></i></a>
+                    <a href="?page=profile&tab=security" class="dropdown-item">
+                        <i class="fa-solid fa-gear"></i> Account Settings
+                    </a>
+                    
+                    <div class="dropdown-divider"></div>
+                    
+                    <a href="?page=profile&tab=danger" class="dropdown-item text-danger">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Danger Zone
+                    </a>
+                    
+                    <div class="dropdown-divider"></div>
+                    
+                    <a href="../public/user_logout.php" class="dropdown-item text-danger">
+                        <i class="fa-solid fa-arrow-right-from-bracket"></i> Logout
+                    </a>
                 </div>
-
-                <?php if ($programs): ?>
-                    <div class="program-list">
-                        <?php foreach ($programs as $program): ?>
-                            <a class="program-row" href="?page=available_programs">
-                                <img class="program-row-photo" src="<?= $e($program['image'] ?? '../asset/img/program_placeholder.jpg') ?>" alt="">
-                                <div class="program-row-body">
-                                    <strong><?= $e($program['title']) ?></strong>
-                                    <span><i class="fa-solid fa-location-dot"></i> <?= $e($program['country']) ?> &middot; <?= $e($program['term']) ?></span>
-                                </div>
-                                <span class="program-row-type"><?= $e($program['type']) ?></span>
-                                <i class="fa-solid fa-chevron-right program-row-arrow"></i>
-                            </a>
-                        <?php endforeach; ?>
-                    </div>
-                <?php else: ?>
-                    <div class="empty-state small"><p>No open programs right now — check back soon.</p></div>
-                <?php endif; ?>
-            </section>
+            </div>
         </div>
+    </header>
 
-        <!-- RIGHT COLUMN -->
-        <div class="dash-right">
-            <!-- Donut & Sparkline -->
-            <section class="panel">
-                <div class="panel-head">
-                    <div><h2>Status Breakdown</h2><p>Application distribution</p></div>
-                    <div class="sparkline-wrap">
-                        <svg viewBox="0 0 100 30" class="sparkline">
-                            <path d="M0,25 C10,20 20,28 30,15 C40,5 50,18 60,10 C70,2 80,12 90,5 L100,8" fill="none" stroke="var(--gold)" stroke-width="2.5" stroke-linecap="round"/>
-                        </svg>
-                    </div>
-                </div>
-                <div class="chart-wrap">
-                    <div class="donut-wrap">
-                        <div class="donut" style="background:<?= $donutGradient ?>">
-                            <div class="donut-center"><?= $totalApplications ?><small>Total</small></div>
-                        </div>
-                    </div>
-                    <div class="legend">
-                        <div class="legend-row"><i style="background:var(--orange)"></i><span>In Review</span><b><?= $inReview ?></b></div>
-                        <div class="legend-row"><i style="background:var(--purple)"></i><span>Pending</span><b><?= $pending ?></b></div>
-                        <div class="legend-row"><i style="background:var(--green)"></i><span>Approved</span><b><?= $approved ?></b></div>
-                        <div class="legend-row"><i style="background:var(--red)"></i><span>Rejected</span><b><?= $rejected ?></b></div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Requirements -->
-            <section class="panel">
-                <div class="panel-head">
-                    <div><h2>Requirements</h2><p><?= $doneCount ?> of <?= count($requirements) ?> complete</p></div>
-                </div>
-                <?php if ($requirements): ?>
-                    <div class="progress-meta"><span>Overall</span><b><?= $overallProgress ?>%</b></div>
-                    <div class="progress-bar"><span style="width:<?= $overallProgress ?>%"></span></div>
-                    <?php foreach ($requirements as $r): ?>
-                        <?php $st = strtolower($r['status']); ?>
-                        <div class="req-row">
-                            <i class="fa-solid <?= $statusIcons[$st] ?? 'fa-circle-dot' ?>" style="color:<?= $statusColors[$st] ?? 'var(--gray-400)' ?>"></i>
-                            <span><?= $e($r['label']) ?></span>
-                            <em><?= $statusLabels[$st] ?? 'Unknown' ?></em>
-                        </div>
-                    <?php endforeach; ?>
-                <?php else: ?>
-                    <div class="empty-state small"><p>Requirements will appear once you start an application.</p></div>
-                <?php endif; ?>
-                <a class="panel-link" href="?page=upload_documents">Manage requirements <i class="fa-solid fa-arrow-right"></i></a>
-            </section>
-
-            <!-- Notifications -->
-            <section class="panel notice-panel">
-                <div class="panel-head">
-                    <div><h2>Recent Updates</h2></div>
-                    <a class="notice-link" href="?page=notifications">All</a>
-                </div>
-                <?php if ($notifications): ?>
-                    <?php foreach ($notifications as $i => $n): ?>
-                        <div class="notice-item <?= !$n['is_read'] ? 'unread' : '' ?>">
-                            <span class="notice-icon"><i class="fa-solid <?= $noticeIcons[$i % count($noticeIcons)] ?>"></i></span>
-                            <div>
-                                <b><?= $e($n['title']) ?></b>
-                                <small><?= $e($n['message']) ?></small>
-                            </div>
-                        </div>
-                    <?php endforeach; ?>
-                <?php else: ?>
-                    <div class="empty-state small on-dark"><p>You're all caught up — no new updates.</p></div>
-                <?php endif; ?>
-            </section>
-
-            <!-- Deadlines -->
-            <section class="panel">
-                <div class="panel-head">
-                    <div><h2>Deadlines</h2></div>
-                </div>
-                <?php if ($deadlines): ?>
-                    <?php foreach ($deadlines as $d): ?>
-                        <?php
-                        $due      = new DateTime($d['due_date']);
-                        $daysLeft = (int) (new DateTime())->diff($due)->format('%r%a');
-                        ?>
-                        <div class="deadline-row">
-                            <div class="deadline-chip"><?= $e($due->format('M j')) ?></div>
-                            <div>
-                                <b><?= $e($d['title']) ?></b>
-                                <small><?= $e($d['description'] ?? '') ?></small>
-                            </div>
-                            <span class="deadline-count"><?= $daysLeft >= 0 ? "{$daysLeft} days left" : 'Past due' ?></span>
-                        </div>
-                    <?php endforeach; ?>
-                <?php else: ?>
-                    <div class="empty-state small"><p>No deadlines scheduled.</p></div>
-                <?php endif; ?>
-            </section>
-        </div>
+    <div class="page-body">
+        <?php include __DIR__ . '/' . $route; ?>
     </div>
-</section>
+</main>
+
+<script src="../asset/js/sidebar.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const notifWrapper = document.getElementById('notifWrapper');
+        const notifToggle = document.getElementById('notifToggle');
+        
+        const userWrapper = document.getElementById('userDropdownWrapper');
+        const userToggle = document.getElementById('userDropdownToggle');
+
+        // Notification Toggle
+        if (notifToggle) {
+            notifToggle.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const isOpen = notifWrapper.classList.toggle('open');
+                notifToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+                
+                if (userWrapper) {
+                    userWrapper.classList.remove('open');
+                    if (userToggle) userToggle.setAttribute('aria-expanded', 'false');
+                }
+            });
+        }
+
+        // User Dropdown Toggle
+        if (userToggle) {
+            userToggle.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const isOpen = userWrapper.classList.toggle('open');
+                userToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+                
+                if (notifWrapper) {
+                    notifWrapper.classList.remove('open');
+                    if (notifToggle) notifToggle.setAttribute('aria-expanded', 'false');
+                }
+            });
+        }
+
+        // Close both when clicking outside
+        document.addEventListener('click', function(e) {
+            if (notifWrapper && notifWrapper.classList.contains('open') && !notifWrapper.contains(e.target)) {
+                notifWrapper.classList.remove('open');
+                if (notifToggle) notifToggle.setAttribute('aria-expanded', 'false');
+            }
+            if (userWrapper && userWrapper.classList.contains('open') && !userWrapper.contains(e.target)) {
+                userWrapper.classList.remove('open');
+                if (userToggle) userToggle.setAttribute('aria-expanded', 'false');
+            }
+        });
+    });
+</script>
+</body>
+</html>

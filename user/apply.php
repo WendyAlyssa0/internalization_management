@@ -1,269 +1,146 @@
 <?php
-require_once __DIR__ . '/../config/db.php';
-
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+// apply.php — handles ?page=apply&program_id=X
+if (!isset($pdo, $userId, $user) || !($pdo instanceof PDO)) {
+    header('Location: dashboard.php?page=available_programs');
+    exit;
 }
 
-$pdo = db();
-$user_id = $_SESSION['user_id'] ?? null;
+$message = '';
+$msgType = '';
+$programId = (int)($_GET['program_id'] ?? $_POST['program_id'] ?? 0);
 
-function e($value)
-{
-    return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+if ($programId <= 0) {
+    header('Location: dashboard.php?page=available_programs');
+    exit;
 }
 
-/* AVAILABLE PROGRAMS */
-$stmt = $pdo->query("
-    SELECT *
-    FROM programs
-    WHERE status = 'Upcoming'
-    ORDER BY created_at DESC
+// Verify program is eligible for this user
+$stmt = $pdo->prepare("
+    SELECT p.id, p.program_name, p.description, p.start_date, p.end_date,
+           country.country_name
+    FROM programs p
+    LEFT JOIN countries country ON country.id = p.country_id
+    WHERE p.id = ?
+      AND p.status IN ('Active', 'Upcoming')
+      AND p.end_date >= CURDATE()
+      AND p.eligible_account_type = ?
+      AND (p.eligible_department = 'All Departments' OR p.eligible_department = ?)
 ");
-$programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$stmt->execute([$programId, $user['account_type'] ?? '', $user['department'] ?? '']);
+$program = $stmt->fetch(PDO::FETCH_ASSOC);
 
-/* ALREADY APPLIED PROGRAM IDs */
-$appliedStmt = $pdo->prepare("
-    SELECT program_id
-    FROM applications
-    WHERE applicant_id = ?
-");
-$appliedStmt->execute([$user_id]);
-$appliedIds = $appliedStmt->fetchAll(PDO::FETCH_COLUMN);
+if (!$program) {
+    header('Location: dashboard.php?page=available_programs');
+    exit;
+}
 
-$success = '';
-$errors  = [];
+// Check for an existing application
+$check = $pdo->prepare("SELECT id, status FROM applications WHERE applicant_id = ? AND program_id = ? LIMIT 1");
+$check->execute([$userId, $programId]);
+$existing = $check->fetch(PDO::FETCH_ASSOC);
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])) {
+    if (!checkCsrf()) {
+        $message = 'Your session expired. Please refresh and try again.';
+        $msgType = 'error';
+    } elseif ($existing) {
+        $message = 'You have already applied to this program.';
+        $msgType = 'warning';
+    } else {
+        try {
+            // CRITICAL: program_id MUST be stored here so documents.php can find it
+            $ins = $pdo->prepare("
+                INSERT INTO applications (applicant_id, program_id, status, created_at, updated_at)
+                VALUES (?, ?, 'pending', NOW(), NOW())
+            ");
+            $ins->execute([$userId, $programId]);
 
-    $program_id = (int)($_POST['program_id'] ?? 0);
-    $reason     = trim($_POST['reason'] ?? '');
-
-    if (!$program_id) {
-        $errors[] = 'Please select a program.';
-    }
-
-    if (!$reason) {
-        $errors[] = 'Statement of purpose is required.';
-    }
-
-    /* DUPLICATE CHECK */
-    if ($program_id && in_array($program_id, $appliedIds)) {
-        $errors[] = 'You have already applied to this program.';
-    }
-
-    if (empty($errors)) {
-
-        $stmt = $pdo->prepare("
-            INSERT INTO applications
-            (
-                applicant_id,
-                program_id,
-                reason,
-                status,
-                created_at
-            )
-            VALUES (?, ?, ?, 'Pending', NOW())
-        ");
-
-        $stmt->execute([$user_id, $program_id, $reason]);
-
-        /* refresh applied IDs after new submission */
-        $appliedIds[] = $program_id;
-
-        $success = 'Application submitted successfully.';
+            $message = 'Application submitted successfully! You will be notified once it is reviewed.';
+            $msgType = 'success';
+            $existing = ['id' => (int)$pdo->lastInsertId(), 'status' => 'pending'];
+        } catch (PDOException $e) {
+            error_log('Application insert failed: ' . $e->getMessage());
+            $message = 'Could not submit your application. Please try again.';
+            $msgType = 'error';
+        }
     }
 }
 
-$check = $pdo->prepare("
-    SELECT id
-    FROM applications
-    WHERE applicant_id = ?
-    AND program_id = ?
+// Fetch requirements for this program (for the preview checklist)
+$reqStmt = $pdo->prepare("
+    SELECT pr.id, pr.is_required, r.requirement_name, r.description
+    FROM program_requirements pr
+    INNER JOIN requirements r ON pr.requirement_id = r.id
+    WHERE pr.program_id = ?
+    ORDER BY r.requirement_name
 ");
+$reqStmt->execute([$programId]);
+$requirements = $reqStmt->fetchAll(PDO::FETCH_ASSOC);
 
-$check->execute([$user_id, $program_id]);
-
-if ($check->fetch()) {
-    $errors[] = 'You have already applied for this program.';
-}
+$csrfToken = $_SESSION['csrf_token'] ?? '';
 ?>
+<style>
+    .apply-page { padding: 32px; background: var(--white); border: 1px solid var(--border-light); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); }
+    .apply-page h2 { font-family: var(--font-heading); color: var(--psu-navy); margin-bottom: 8px; }
+    .apply-page .lead { color: var(--text-muted); margin-bottom: 24px; }
+    .apply-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 24px 0; }
+    .apply-meta div { padding: 16px; background: var(--bg-main); border-radius: var(--radius-sm); }
+    .apply-meta small { display: block; text-transform: uppercase; font-size: 0.7rem; color: var(--text-light); font-weight: 700; margin-bottom: 4px; }
+    .apply-meta strong { color: var(--psu-navy); font-family: var(--font-heading); }
+    .req-list { list-style: none; padding: 0; margin: 16px 0 24px; }
+    .req-list li { padding: 12px 16px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); margin-bottom: 8px; }
+    .req-list li strong { color: var(--psu-navy); }
+    .req-list li small { color: var(--text-muted); display: block; margin-top: 2px; }
+    .apply-actions { display: flex; gap: 12px; margin-top: 24px; }
+    .btn-apply { padding: 12px 24px; background: var(--psu-navy); color: #fff; border: 1px solid var(--psu-navy); border-radius: var(--radius-sm); font-weight: 700; cursor: pointer; }
+    .btn-apply:hover { background: var(--psu-blue); border-color: var(--psu-blue); }
+    .btn-back { padding: 12px 24px; background: var(--white); color: var(--psu-navy); border: 1px solid var(--border-light); border-radius: var(--radius-sm); text-decoration: none; font-weight: 600; }
+    .program-alert { padding: 16px 20px; border-radius: var(--radius-sm); margin-bottom: 24px; border: 1px solid; font-weight: 500; }
+    .program-alert.success { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
+    .program-alert.error { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+    .program-alert.warning { color: #92400e; background: #fffbeb; border-color: #fde68a; }
+</style>
 
-<link rel="stylesheet" href="../asset/css/apply_addition.css">
+<div class="apply-page">
+    <h2>Apply to <?= h($program['program_name']) ?></h2>
+    <p class="lead">Review the program details and requirements before submitting your application.</p>
 
-<div class="content-card">
-
-    <div class="page-header">
-        <div class="page-header-icon">
-            <i class="fa-solid fa-plane-departure"></i>
-        </div>
-        <div>
-            <h2>Apply for a Mobility Program</h2>
-            <p>Select an available program and submit your application.</p>
-        </div>
-    </div>
-
-    <!-- AVAILABLE PROGRAMS -->
-    <div class="program-section">
-
-        <h3 class="section-title">
-            <i class="fa-solid fa-graduation-cap"></i>
-            Available Programs
-        </h3>
-
-        <div class="program-grid">
-
-            <?php foreach ($programs as $program): ?>
-                <?php $alreadyApplied = in_array($program['id'], $appliedIds); ?>
-
-                <div class="program-card <?= $alreadyApplied ? 'program-card--applied' : '' ?>">
-
-                    <div class="program-card-header">
-                        <h4><?= e($program['program_name']) ?></h4>
-                        <?php if ($alreadyApplied): ?>
-                            <span class="applied-badge">
-                                <i class="fa-solid fa-circle-check"></i>
-                                Applied
-                            </span>
-                        <?php endif; ?>
-                    </div>
-
-                    <div class="program-card-body">
-                        <p><?= e($program['description']) ?></p>
-                        <div class="program-meta">
-                            <span>
-                                <i class="fa-solid fa-building"></i>
-                                <?= e($program['partner_institution']) ?>
-                            </span>
-                            <span>
-                                <i class="fa-solid fa-location-dot"></i>
-                                <?= e($program['country']) ?>
-                            </span>
-                            <span>
-                                <i class="fa-solid fa-calendar"></i>
-                                <?= e($program['start_date']) ?> - <?= e($program['end_date']) ?>
-                            </span>
-                        </div>
-                    </div>
-
-                </div>
-
-            <?php endforeach; ?>
-
-        </div>
-
-    </div>
-
-    <?php if ($success): ?>
-        <div class="alert alert-success">
-            <i class="fa-solid fa-circle-check"></i>
-            <?= e($success) ?>
-            <a href="home.php?page=my_applications" class="alert-link">
-                View My Applications →
-            </a>
-        </div>
+    <?php if ($message): ?>
+        <div class="program-alert <?= h($msgType) ?>"><?= h($message) ?></div>
     <?php endif; ?>
 
-    <?php if (!empty($errors)): ?>
-        <div class="alert alert-error">
-            <?php foreach ($errors as $error): ?>
-                <div><?= e($error) ?></div>
+    <p><?= nl2br(h($program['description'] ?? '')) ?></p>
+
+    <div class="apply-meta">
+        <div><small>Location</small><strong><?= h($program['country_name'] ?? 'TBA') ?></strong></div>
+        <div><small>Duration</small><strong>
+            <?= h(date('M d, Y', strtotime($program['start_date']))) ?> – <?= h(date('M d, Y', strtotime($program['end_date']))) ?>
+        </strong></div>
+    </div>
+
+    <?php if ($requirements): ?>
+        <h3 style="font-family: var(--font-heading); color: var(--psu-navy);">Requirements Preview</h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem;">You will upload these after your application is approved.</p>
+        <ul class="req-list">
+            <?php foreach ($requirements as $r): ?>
+                <li>
+                    <strong><?= h($r['requirement_name']) ?><?= !empty($r['is_required']) ? ' *' : '' ?></strong>
+                    <small><?= h($r['description'] ?? '') ?></small>
+                </li>
             <?php endforeach; ?>
-        </div>
+        </ul>
     <?php endif; ?>
 
-    <!-- APPLICATION FORM -->
-    <form method="POST" class="apply-form" id="applyForm">
-
-        <div class="form-group">
-            <label>Select Program</label>
-            <select name="program_id" id="programSelect" required>
-                <option value="">Choose a Program</option>
-                <?php foreach ($programs as $program): ?>
-                    <option
-                        value="<?= $program['id'] ?>"
-                        data-country="<?= e($program['country']) ?>"
-                        data-partner="<?= e($program['partner_institution']) ?>"
-                        data-start="<?= e($program['start_date']) ?>"
-                        data-end="<?= e($program['end_date']) ?>"
-                        data-applied="<?= in_array($program['id'], $appliedIds) ? '1' : '0' ?>"
-                    >
-                        <?= e($program['program_name']) ?>
-                        <?= in_array($program['id'], $appliedIds) ? '(Already Applied)' : '' ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-
-            <div class="duplicate-warning" id="duplicateWarning" style="display:none;">
-                <i class="fa-solid fa-triangle-exclamation"></i>
-                You have already applied to this program. Duplicate applications are not allowed.
-            </div>
-        </div>
-
-        <div class="form-row">
-            <div class="form-group">
-                <label>Partner Institution</label>
-                <input type="text" id="partner" readonly>
-            </div>
-            <div class="form-group">
-                <label>Country</label>
-                <input type="text" id="country" readonly>
-            </div>
-        </div>
-
-        <div class="form-row">
-            <div class="form-group">
-                <label>Start Date</label>
-                <input type="text" id="startDate" readonly>
-            </div>
-            <div class="form-group">
-                <label>End Date</label>
-                <input type="text" id="endDate" readonly>
-            </div>
-        </div>
-
-        <div class="form-group">
-            <label>Statement of Purpose</label>
-            <textarea
-                name="reason"
-                rows="5"
-                maxlength="500"
-                placeholder="Explain why you want to join this mobility program..."
-                required
-            ></textarea>
-        </div>
-
-        <div class="form-footer">
-            <a href="home.php?page=my_applications" class="btn btn-outline">
-                <i class="fa-solid fa-folder-open"></i>
-                My Applications
-            </a>
-            <button type="submit" class="btn" id="submitBtn">
-                <i class="fa-solid fa-paper-plane"></i>
-                Submit Application
-            </button>
-        </div>
-
-    </form>
-
+    <div class="apply-actions">
+        <a class="btn-back" href="?page=available_programs">Back</a>
+        <?php if (!$existing): ?>
+            <form method="POST" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
+                <input type="hidden" name="program_id" value="<?= (int)$programId ?>">
+                <button type="submit" name="submit_application" class="btn-apply">Submit Application</button>
+            </form>
+        <?php else: ?>
+            <a class="btn-back" href="?page=my_applications">View My Application</a>
+        <?php endif; ?>
+    </div>
 </div>
-
-<script>
-const select        = document.getElementById('programSelect');
-const duplicateWarn = document.getElementById('duplicateWarning');
-const submitBtn     = document.getElementById('submitBtn');
-
-select.addEventListener('change', function () {
-    const option = this.options[this.selectedIndex];
-
-    document.getElementById('partner').value   = option.dataset.partner || '';
-    document.getElementById('country').value   = option.dataset.country || '';
-    document.getElementById('startDate').value = option.dataset.start   || '';
-    document.getElementById('endDate').value   = option.dataset.end     || '';
-
-    const alreadyApplied = option.dataset.applied === '1';
-    duplicateWarn.style.display = alreadyApplied ? 'flex' : 'none';
-    submitBtn.disabled          = alreadyApplied;
-    submitBtn.classList.toggle('btn--disabled', alreadyApplied);
-});
-</script>

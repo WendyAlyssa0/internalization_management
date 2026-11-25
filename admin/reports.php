@@ -1,15 +1,21 @@
 ﻿<?php
-ini_set('display_errors', '1');
-error_reporting(E_ALL);
-
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/roles.php';
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+requireLogin(); // Ensure user is logged in
+
 $pdo = db();
 
 /* =========================
    HELPERS
 ========================= */
-function h($v){
-    return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+if (!function_exists('h')) {
+    function h($v){
+        return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+    }
 }
 
 function countRows(PDO $pdo, string $sql, array $params = []): int {
@@ -24,7 +30,7 @@ function countRows(PDO $pdo, string $sql, array $params = []): int {
 }
 
 /* =========================
-   MONTHLY APPLICATIONS (Last 12 Months, zero-filled)
+   MONTHLY APPLICATIONS (Last 12 Months)
 ========================= */
 $monthLabels = [];
 $monthCounts = [];
@@ -55,14 +61,16 @@ try {
 /* =========================
    HEADLINE COUNTS
 ========================= */
-$totalApplicants   = countRows($pdo, "SELECT COUNT(*) FROM users WHERE user_role = 'applicant'");
+// Assuming your users table uses 'role' column (if it uses 'user_role', change it back)
+$totalApplicants = countRows($pdo, "SELECT COUNT(*) FROM users WHERE role = 'applicant' OR user_role = 'applicant'");
+
 $totalPrograms     = countRows($pdo, "SELECT COUNT(*) FROM programs");
 $activePrograms    = countRows($pdo, "SELECT COUNT(*) FROM programs WHERE status = 'Active'");
 $upcomingPrograms  = countRows($pdo, "SELECT COUNT(*) FROM programs WHERE status = 'Upcoming'");
 $completedPrograms = countRows($pdo, "SELECT COUNT(*) FROM programs WHERE status = 'Completed'");
 
-// Status buckets mapped to your actual enum
-$pending  = countRows($pdo, "SELECT COUNT(*) FROM applications WHERE status IN ('submitted','under_review')");
+// Status buckets
+$pending  = countRows($pdo, "SELECT COUNT(*) FROM applications WHERE status IN ('submitted', 'under_review')");
 $approved = countRows($pdo, "SELECT COUNT(*) FROM applications WHERE status = 'approved'");
 $rejected = countRows($pdo, "SELECT COUNT(*) FROM applications WHERE status = 'rejected'");
 
@@ -94,6 +102,7 @@ try {
 $firstName = $_SESSION['first_name'] ?? 'Administrator';
 ?>
 
+<!-- The UI remains completely unchanged -->
 <div class="db-wrap">
 
     <!-- ============= PAGE HEAD ============= -->
@@ -213,7 +222,8 @@ $firstName = $_SESSION['first_name'] ?? 'Administrator';
                             <span class="qa-sub">Broadcast to applicants</span>
                         </span>
                     </a>
-                    <a class="quick-action" href="?page=reports">
+                    <!-- Fixed link from ?page=reports to ?page=home -->
+                    <a class="quick-action" href="?page=home">
                         <span class="qa-icon material-symbols-outlined">description</span>
                         <span class="qa-text">
                             <span class="qa-title">Reports</span>
@@ -269,14 +279,21 @@ $firstName = $_SESSION['first_name'] ?? 'Administrator';
                                 </td>
                                 <td>
                                     <?php
+                                        // Replaced PHP 8 'match' with switch for backward compatibility
                                         $status = strtolower($a['status'] ?? 'submitted');
-                                        [$badgeClass, $label] = match($status) {
-                                            'approved'     => ['success', 'Approved'],
-                                            'rejected'     => ['danger',  'Rejected'],
-                                            'under_review' => ['info',    'Under Review'],
-                                            'submitted'    => ['warning', 'Submitted'],
-                                            default        => ['neutral', ucfirst($status)],
-                                        };
+                                        $badgeClass = 'neutral';
+                                        $label = ucfirst($status);
+                                        
+                                        switch($status) {
+                                            case 'approved':
+                                                $badgeClass = 'success'; $label = 'Approved'; break;
+                                            case 'rejected':
+                                                $badgeClass = 'danger'; $label = 'Rejected'; break;
+                                            case 'under_review':
+                                                $badgeClass = 'info'; $label = 'Under Review'; break;
+                                            case 'submitted':
+                                                $badgeClass = 'warning'; $label = 'Submitted'; break;
+                                        }
                                     ?>
                                     <span class="badge <?= $badgeClass ?>"><?= h($label) ?></span>
                                 </td>

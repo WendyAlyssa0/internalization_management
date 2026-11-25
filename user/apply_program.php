@@ -1,210 +1,180 @@
 <?php
-require_once __DIR__ . '/../config/db.php';
-
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
-$pdo = db();
-$user_id = $_SESSION['user_id'] ?? null;
-
-function e($value)
-{
-    return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
-}
-
-/* 
- * AVAILABLE PROGRAMS 
- * We need to JOIN partners and countries to get the actual names.
+/**
+ * Application handler — processes "Start Application" / "Apply" form submissions.
+ * Included from home.php (or routed via ?page=apply_program).
  */
-$stmt = $pdo->query("
-    SELECT 
-        p.*, 
-        pr.institution_name AS partner_institution, 
-        c.country_name AS country
-    FROM programs p
-    LEFT JOIN partners pr ON pr.id = p.partner_id
-    LEFT JOIN countries c ON c.id = p.country_id
-    WHERE p.start_date >= CURDATE() 
-    ORDER BY p.created_at DESC
-");
-$programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$success = '';
-$errors = [];
+if (!isset($pdo, $userId) || !($pdo instanceof PDO)) {
+    header('Location: dashboard.php?page=available_programs');
+    exit;
+}
+
+/* =========================================================
+   CONFIGURE THESE IF YOUR SCHEMA DIFFERS
+   ========================================================= */
+$APP_USER_COL = 'applicant_id';
+
+if (session_status() === PHP_SESSION_NONE) session_start();
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+function csrf_ok(): bool {
+    return isset($_POST['csrf_token'], $_SESSION['csrf_token'])
+        && hash_equals($_SESSION['csrf_token'], (string)$_POST['csrf_token']);
+}
+
+$programId = (int)($_POST['program_id'] ?? $_GET['program_id'] ?? 0);
+$action    = (string)($_POST['action'] ?? $_GET['action'] ?? 'start');
+
+$flash = null;
+$departmentStmt = $pdo->prepare('SELECT department, account_type FROM users WHERE id = ?');
+$departmentStmt->execute([$userId]);
+$applicant = $departmentStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+$applicantDepartment = (string)($applicant['department'] ?? '');
+$applicantAccountType = (string)($applicant['account_type'] ?? '');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $program_id = (int)($_POST['program_id'] ?? 0);
-    $reason     = trim($_POST['reason'] ?? '');
-
-    if (!$program_id) {
-        $errors[] = 'Please select a program.';
-    }
-    if (!$reason) {
-        $errors[] = 'Statement of purpose is required.';
-    } elseif (strlen($reason) > 500) {
-        $errors[] = 'Statement of purpose cannot exceed 500 characters.';
-    }
-
-    if (empty($errors)) {
+    if (!csrf_ok()) {
+        $flash = ['type' => 'error', 'msg' => 'Session expired. Please try again.'];
+    } elseif ($programId <= 0) {
+        $flash = ['type' => 'error', 'msg' => 'Invalid program selected.'];
+    } else {
         $stmt = $pdo->prepare("
-            INSERT INTO applications
-            (applicant_id, program_id, reason, status, created_at)
-            VALUES (?, ?, ?, 'Pending', NOW())
+            SELECT p.id, p.program_name, p.status, p.end_date
+            FROM programs p
+            WHERE p.id = ?
+              AND p.eligible_department IN ('All Departments', ?)
+              AND p.eligible_account_type = ?
+            LIMIT 1
         ");
-        $stmt->execute([$user_id, $program_id, $reason]);
-        $success = 'Application submitted successfully. We will notify you once it has been reviewed.';
+        $stmt->execute([$programId, $applicantDepartment, $applicantAccountType]);
+        $program = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$program) {
+            $flash = ['type' => 'error', 'msg' => 'Program not found.'];
+        } elseif (!in_array($program['status'], ['Active', 'Upcoming'], true)) {
+            $flash = ['type' => 'error', 'msg' => 'This program is not currently accepting applications.'];
+        } elseif (!empty($program['end_date']) && strtotime($program['end_date']) < time()) {
+            $flash = ['type' => 'error', 'msg' => 'The application deadline for this program has passed.'];
+        } else {
+            $stmt = $pdo->prepare("SELECT id, status FROM applications WHERE {$APP_USER_COL} = ? AND program_id = ? LIMIT 1");
+            $stmt->execute([$userId, $programId]);
+            $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($action === 'cancel') {
+                if ($existing && $existing['status'] === 'draft') {
+                    $del = $pdo->prepare("DELETE FROM applications WHERE id = ? AND {$APP_USER_COL} = ? AND status = 'draft'");
+                    $del->execute([$existing['id'], $userId]);
+                    $_SESSION['apply_flash'] = ['type' => 'success', 'msg' => 'Draft application cancelled.'];
+                } else {
+                    $_SESSION['apply_flash'] = ['type' => 'error', 'msg' => 'Only draft applications can be cancelled.'];
+                }
+                header('Location: ?page=my_applications');
+                exit;
+            }
+
+            if ($existing) {
+                if ($existing['status'] === 'draft') {
+                    header('Location: ?page=apply&program_id=' . $programId);
+                    exit;
+                }
+                $_SESSION['apply_flash'] = ['type' => 'error', 'msg' => 'You have already applied to this program.'];
+                header('Location: ?page=my_application_detail&id=' . (int)$existing['id']);
+                exit;
+            }
+
+            try {
+                $ins = $pdo->prepare("INSERT INTO applications ({$APP_USER_COL}, program_id, status, created_at) VALUES (?, ?, 'draft', NOW())");
+                $ins->execute([$userId, $programId]);
+                $newId = (int)$pdo->lastInsertId();
+                $_SESSION['apply_flash'] = ['type' => 'success', 'msg' => 'Application started. Fill in your details.'];
+                header('Location: ?page=apply&program_id=' . $programId . '&id=' . $newId);
+                exit;
+            } catch (PDOException $e) {
+                error_log('apply_program insert: ' . $e->getMessage());
+                $flash = ['type' => 'error', 'msg' => 'Could not start the application. Please try again.'];
+            }
+        }
     }
+}
+
+$stmt = $pdo->prepare("
+    SELECT p.id, p.program_name, p.description, p.start_date, p.end_date, p.status,
+           country.country_name,
+           EXISTS (SELECT 1 FROM applications a WHERE a.{$APP_USER_COL} = ? AND a.program_id = p.id) AS already_applied
+    FROM programs p
+    INNER JOIN users applicant ON applicant.id = ?
+    LEFT JOIN countries country ON country.id = p.country_id
+    WHERE p.status IN ('Active', 'Upcoming')
+      AND (p.end_date IS NULL OR p.end_date >= CURDATE())
+      AND p.eligible_account_type = applicant.account_type
+      AND (p.eligible_department = 'All Departments' OR p.eligible_department = applicant.department)
+    ORDER BY p.start_date, p.program_name
+");
+$stmt->execute([$userId, $userId]);
+$programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+if (!empty($_SESSION['apply_flash'])) {
+    $flash = $_SESSION['apply_flash'];
+    unset($_SESSION['apply_flash']);
 }
 ?>
 
-<link rel="stylesheet" href="../asset/css/apply.css">
+<link rel="stylesheet" href="../asset/css/upload_docs.css">
 
 <div class="content-card">
-
     <div class="page-header">
-        <div class="page-header-icon">
-            <i class="fa-solid fa-plane-departure"></i>
-        </div>
         <div>
-            <h2>Apply for a Mobility Program</h2>
-            <p>Select an available program from the list below and submit your application.</p>
+            <h2>Apply to a Program</h2>
+            <p>Choose a program below to start your application.</p>
         </div>
     </div>
 
-    <?php if ($success): ?>
-        <div class="alert alert-success">
-            <i class="fa-solid fa-circle-check"></i>
-            <span><?= e($success) ?></span>
+    <?php if ($flash): ?>
+        <div class="alert alert-<?= htmlspecialchars($flash['type'], ENT_QUOTES, 'UTF-8') ?>">
+            <i class="fa-solid <?= $flash['type'] === 'success' ? 'fa-circle-check' : 'fa-triangle-exclamation' ?>"></i>
+            <?= htmlspecialchars($flash['msg'], ENT_QUOTES, 'UTF-8') ?>
         </div>
     <?php endif; ?>
 
-    <?php if (!empty($errors)): ?>
-        <div class="alert alert-error">
-            <i class="fa-solid fa-triangle-exclamation"></i>
-            <div>
-                <?php foreach ($errors as $error): ?>
-                    <div><?= e($error) ?></div>
-                <?php endforeach; ?>
+    <?php if (empty($programs)): ?>
+        <p class="muted">No programs are open for application right now.</p>
+    <?php else: ?>
+        <div class="program-grid">
+            <?php foreach ($programs as $p): ?>
+            <div class="program-card">
+                <div class="program-card-head">
+                    <h3><?= htmlspecialchars($p['program_name'], ENT_QUOTES, 'UTF-8') ?></h3>
+                    <?php if (!empty($p['country_name'])): ?>
+                        <span class="country-chip"><i class="fa-solid fa-location-dot"></i> <?= htmlspecialchars($p['country_name'], ENT_QUOTES, 'UTF-8') ?></span>
+                    <?php endif; ?>
+                </div>
+                <p class="program-desc"><?= htmlspecialchars(mb_strimwidth((string)($p['description'] ?? ''), 0, 160, '…'), ENT_QUOTES, 'UTF-8') ?></p>
+                <div class="program-meta">
+                    <?php if (!empty($p['start_date']) && !empty($p['end_date'])): ?>
+                        <span>
+                            <i class="fa-regular fa-calendar"></i>
+                            <?= htmlspecialchars(date('M d, Y', strtotime($p['start_date'])), ENT_QUOTES, 'UTF-8') ?>
+                            – <?= htmlspecialchars(date('M d, Y', strtotime($p['end_date'])), ENT_QUOTES, 'UTF-8') ?>
+                        </span>
+                    <?php endif; ?>
+                </div>
+                <div class="program-card-actions">
+                    <?php if ($p['already_applied']): ?>
+                        <span class="badge-success">Already applied</span>
+                        <a class="btn-secondary" href="?page=my_applications">View status</a>
+                    <?php else: ?>
+                        <a class="btn-secondary" href="?page=program_detail&id=<?= (int)$p['id'] ?>">View details</a>
+                        <form method="POST" style="display:inline">
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8') ?>">
+                            <input type="hidden" name="program_id" value="<?= (int)$p['id'] ?>">
+                            <input type="hidden" name="action" value="start">
+                            <button type="submit" class="btn-primary">Apply now →</button>
+                        </form>
+                    <?php endif; ?>
+                </div>
             </div>
+            <?php endforeach; ?>
         </div>
     <?php endif; ?>
-
-    <!-- APPLICATION FORM -->
-    <form method="POST" class="apply-form">
-
-        <div class="form-group">
-            <label for="programSelect">Select Program <span class="required">*</span></label>
-            <select name="program_id" id="programSelect" required>
-                <option value="" disabled selected>Choose a Program...</option>
-                <?php foreach ($programs as $program): ?>
-                    <option
-                        value="<?= $program['id'] ?>"
-                        data-country="<?= e($program['country'] ?? 'N/A') ?>"
-                        data-partner="<?= e($program['partner_institution'] ?? 'N/A') ?>"
-                        data-start="<?= e($program['start_date']) ?>"
-                        data-end="<?= e($program['end_date']) ?>"
-                    >
-                        <?= e($program['program_name']) ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-            <?php if (empty($programs)): ?>
-                <small class="form-hint" style="color: var(--red);">No open programs available right now. Check back later.</small>
-            <?php endif; ?>
-        </div>
-
-        <div class="form-row">
-            <div class="form-group">
-                <label>Partner Institution</label>
-                <div class="input-icon-wrapper">
-                    <i class="fa-solid fa-building"></i>
-                    <input type="text" id="partner" placeholder="Auto-filled based on selection" readonly>
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label>Country</label>
-                <div class="input-icon-wrapper">
-                    <i class="fa-solid fa-location-dot"></i>
-                    <input type="text" id="country" placeholder="Auto-filled based on selection" readonly>
-                </div>
-            </div>
-        </div>
-
-        <div class="form-row">
-            <div class="form-group">
-                <label>Start Date</label>
-                <div class="input-icon-wrapper">
-                    <i class="fa-regular fa-calendar"></i>
-                    <input type="text" id="startDate" placeholder="Auto-filled" readonly>
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label>End Date</label>
-                <div class="input-icon-wrapper">
-                    <i class="fa-regular fa-calendar-check"></i>
-                    <input type="text" id="endDate" placeholder="Auto-filled" readonly>
-                </div>
-            </div>
-        </div>
-
-        <div class="form-group">
-            <label for="reason">Statement of Purpose <span class="required">*</span></label>
-            <textarea
-                name="reason"
-                id="reason"
-                rows="5"
-                maxlength="500"
-                placeholder="Explain why you want to join this mobility program, how it aligns with your studies, and what you hope to achieve..."
-                required
-            ></textarea>
-            <div class="char-count"><span id="charCount">0</span> / 500 characters</div>
-        </div>
-
-        <div class="form-footer">
-            <button type="submit" class="btn-primary" <?= empty($programs) ? 'disabled' : '' ?>>
-                <i class="fa-solid fa-paper-plane"></i> Submit Application
-            </button>
-        </div>
-
-    </form>
-
 </div>
-
-<script>
-const select = document.getElementById('programSelect');
-const partnerInput = document.getElementById('partner');
-const countryInput = document.getElementById('country');
-const startDateInput = document.getElementById('startDate');
-const endDateInput = document.getElementById('endDate');
-const reasonInput = document.getElementById('reason');
-const charCount = document.getElementById('charCount');
-
-// Format dates beautifully (e.g., "Jun 1, 2024")
-function formatDate(dateStr) {
-    if (!dateStr) return '';
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-select.addEventListener('change', function () {
-    const option = this.options[this.selectedIndex];
-    
-    partnerInput.value = option.dataset.partner || '';
-    countryInput.value = option.dataset.country || '';
-    startDateInput.value = formatDate(option.dataset.start);
-    endDateInput.value = formatDate(option.dataset.end);
-});
-
-// Character counter for the textarea
-reasonInput.addEventListener('input', function() {
-    charCount.textContent = this.value.length;
-    if (this.value.length >= 500) {
-        charCount.style.color = 'var(--red)';
-    } else {
-        charCount.style.color = 'var(--gray-500)';
-    }
-});
-</script>

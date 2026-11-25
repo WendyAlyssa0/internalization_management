@@ -1,9 +1,11 @@
 <?php
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/auth_middleware.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+requireAdmin();
 
 $pdo = db();
 
@@ -33,6 +35,97 @@ function checkCsrf(): void {
 }
 
 /* ===================================================
+   AJAX ENDPOINT (upload requirement file)
+   =================================================== */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'upload_file') {
+    header('Content-Type: application/json');
+    checkCsrf();
+
+    $programRequirementId = (int)($_POST['program_requirement_id'] ?? 0);
+    $file = $_FILES['requirement_file'] ?? null;
+
+    if ($programRequirementId <= 0 || !$file || !isset($file['error'], $file['tmp_name'], $file['size'])) {
+        echo json_encode(['ok' => false, 'message' => 'Choose a requirement and a file to upload.']);
+        exit();
+    }
+
+    if ($file['error'] !== UPLOAD_ERR_OK) {
+        $message = $file['error'] === UPLOAD_ERR_INI_SIZE || $file['error'] === UPLOAD_ERR_FORM_SIZE
+            ? 'The file exceeds the 10 MB upload limit.'
+            : 'The file could not be uploaded. Please try again.';
+        echo json_encode(['ok' => false, 'message' => $message]);
+        exit();
+    }
+
+    if ($file['size'] <= 0 || $file['size'] > 10 * 1024 * 1024 || !is_uploaded_file($file['tmp_name'])) {
+        echo json_encode(['ok' => false, 'message' => 'Choose a valid file no larger than 10 MB.']);
+        exit();
+    }
+
+    $requirementStmt = $pdo->prepare("SELECT requirement_file FROM program_requirements WHERE id = ?");
+    $requirementStmt->execute([$programRequirementId]);
+    $oldFilePath = $requirementStmt->fetchColumn();
+
+    if ($oldFilePath === false) {
+        echo json_encode(['ok' => false, 'message' => 'The selected program requirement was not found.']);
+        exit();
+    }
+
+    $allowedMimeTypes = [
+        'application/pdf' => 'pdf',
+        'application/msword' => 'doc',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+    ];
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mimeType = $finfo->file($file['tmp_name']);
+
+    if (!isset($allowedMimeTypes[$mimeType])) {
+        echo json_encode(['ok' => false, 'message' => 'Only PDF, DOC, or DOCX files are allowed.']);
+        exit();
+    }
+
+    $uploadDirectory = __DIR__ . '/../uploads/requirement_templates';
+    if (!is_dir($uploadDirectory) && !mkdir($uploadDirectory, 0755, true) && !is_dir($uploadDirectory)) {
+        error_log('Unable to create the requirement template upload directory.');
+        echo json_encode(['ok' => false, 'message' => 'The upload location is unavailable. Please try again.']);
+        exit();
+    }
+
+    $filename = bin2hex(random_bytes(16)) . '.' . $allowedMimeTypes[$mimeType];
+    $destination = $uploadDirectory . DIRECTORY_SEPARATOR . $filename;
+    $relativePath = 'uploads/requirement_templates/' . $filename;
+
+    if (!move_uploaded_file($file['tmp_name'], $destination)) {
+        echo json_encode(['ok' => false, 'message' => 'The file could not be saved. Please try again.']);
+        exit();
+    }
+
+    try {
+        $updateStmt = $pdo->prepare("UPDATE program_requirements SET requirement_file = ? WHERE id = ?");
+        $updateStmt->execute([$relativePath, $programRequirementId]);
+    } catch (PDOException $e) {
+        unlink($destination);
+        error_log('program_requirements.php upload error: ' . $e->getMessage());
+        echo json_encode(['ok' => false, 'message' => 'The requirement file could not be saved. Please try again.']);
+        exit();
+    }
+
+    if (
+        is_string($oldFilePath) &&
+        strpos($oldFilePath, 'uploads/requirement_templates/') === 0 &&
+        basename($oldFilePath) !== $filename
+    ) {
+        $oldFile = $uploadDirectory . DIRECTORY_SEPARATOR . basename($oldFilePath);
+        if (is_file($oldFile) && !unlink($oldFile)) {
+            error_log('Unable to remove a replaced requirement template: ' . $oldFile);
+        }
+    }
+
+    echo json_encode(['ok' => true, 'message' => 'Requirement file uploaded successfully.']);
+    exit();
+}
+
+/* ===================================================
    AJAX ENDPOINT (add requirement)
    =================================================== */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add') {
@@ -49,7 +142,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 
     try {
-        // Check if it already exists
         $check = $pdo->prepare("SELECT id FROM program_requirements WHERE program_id = ? AND requirement_id = ?");
         $check->execute([$program_id, $requirement_id]);
         if ($check->fetch()) {
@@ -57,12 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             exit();
         }
 
-        // Insert using the IDs
-        $stmt = $pdo->prepare("
-            INSERT INTO program_requirements
-            (program_id, requirement_id, is_required)
-            VALUES (?, ?, ?)
-        ");
+        $stmt = $pdo->prepare("INSERT INTO program_requirements (program_id, requirement_id, is_required) VALUES (?, ?, ?)");
         $stmt->execute([$program_id, $requirement_id, $is_required]);
 
         echo json_encode(['ok' => true, 'message' => 'Requirement assigned successfully.']);
@@ -73,36 +160,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit();
 }
 
-/* Fetch Programs */
-$programs = $pdo->query("
-    SELECT id, program_name
-    FROM programs
-    ORDER BY program_name
-")->fetchAll(PDO::FETCH_ASSOC);
+/* Fetch Programs & Requirements */
+$programs = $pdo->query("SELECT id, program_name FROM programs ORDER BY program_name")->fetchAll(PDO::FETCH_ASSOC);
+$masterRequirements = $pdo->query("SELECT id, requirement_name FROM requirements ORDER BY requirement_name")->fetchAll(PDO::FETCH_ASSOC);
 
-/* Fetch Master Requirements */
-$masterRequirements = $pdo->query("
-    SELECT id, requirement_name
-    FROM requirements
-    ORDER BY requirement_name
-")->fetchAll(PDO::FETCH_ASSOC);
-
-/* Fetch total count for pagination */
-$totalCount = (int)$pdo->query("
-    SELECT COUNT(*)
-    FROM program_requirements
-")->fetchColumn();
-
+$totalCount = (int)$pdo->query("SELECT COUNT(*) FROM program_requirements")->fetchColumn();
 $totalPages = max(1, ceil($totalCount / $limit));
 
-/* Fetch linked requirements */
 $stmt = $pdo->prepare("
-    SELECT
-        pr.id,
-        p.program_name,
-        r.requirement_name,
-        pr.is_required,
-        pr.created_at
+    SELECT pr.id, p.program_name, r.requirement_name, pr.is_required, pr.requirement_file, pr.created_at
     FROM program_requirements pr
     INNER JOIN programs p ON pr.program_id = p.id
     INNER JOIN requirements r ON pr.requirement_id = r.id
@@ -112,35 +178,32 @@ $stmt = $pdo->prepare("
 $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
 $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
 $stmt->execute();
-
 $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <link rel="stylesheet" href="../asset/css/program_requirements.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
-<!-- FIXED: Changed .content to .content-card to match CSS -->
 <div class="content-card">
-
     <div class="page-header">
         <h2>Program Requirements</h2>
         <p>Assign specific documents from your master list to individual programs.</p>
     </div>
 
     <div class="toolbar">
-        <!-- FIXED: Changed .create-btn to .btn-primary to match CSS -->
         <button type="button" class="btn-primary" onclick="openAddModal()">
             <i class="fa fa-plus"></i> Assign Requirement
         </button>
     </div>
 
     <div class="table-card">
-
         <table>
             <thead>
                 <tr>
                     <th>Program</th>
                     <th>Requirement</th>
                     <th>Status</th>
+                    <th>Applicant File</th>
                     <th>Created</th>
                 </tr>
             </thead>
@@ -157,17 +220,34 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             </div>
                         </td>
                         <td>
-                            <!-- FIXED: Changed to .badge-success / .badge-secondary to match CSS -->
                             <?= $row['is_required']
                                 ? '<span class="badge-success">Required</span>'
                                 : '<span class="badge-secondary">Optional</span>' ?>
+                        </td>
+                        <td>
+                            <?php if (!empty($row['requirement_file'])): ?>
+                                <a class="requirement-file-link" href="../<?= h($row['requirement_file']) ?>" target="_blank" rel="noopener">
+                                    <i class="fa-solid fa-eye"></i> View current file
+                                </a>
+                            <?php endif; ?>
+                            <form class="requirement-file-form" enctype="multipart/form-data">
+                                <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
+                                <input type="hidden" name="action" value="upload_file">
+                                <input type="hidden" name="program_requirement_id" value="<?= (int)$row['id'] ?>">
+                                <input class="requirement-file-input" type="file" name="requirement_file" accept=".pdf,.doc,.docx" required>
+                                <button type="submit" class="btn-file-upload">
+                                    <i class="fa-solid fa-upload"></i>
+                                    <?= empty($row['requirement_file']) ? 'Upload file' : 'Replace file' ?>
+                                </button>
+                                <small>PDF, DOC, or DOCX (max 10 MB)</small>
+                            </form>
                         </td>
                         <td><?= date('M d, Y', strtotime($row['created_at'])) ?></td>
                     </tr>
                     <?php endforeach; ?>
                 <?php else: ?>
                     <tr class="empty-row">
-                        <td colspan="4">No requirements assigned to any program yet.</td>
+                        <td colspan="5">No requirements assigned to any program yet.</td>
                     </tr>
                 <?php endif; ?>
             </tbody>
@@ -175,60 +255,41 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         <!-- PAGINATION -->
         <div class="pagination">
-            <span>
-                Showing <?= count($requirements) ?> of <?= $totalCount ?> requirement<?= $totalCount === 1 ? '' : 's' ?>
-            </span>
+            <span>Showing <?= count($requirements) ?> of <?= $totalCount ?> requirement<?= $totalCount === 1 ? '' : 's' ?></span>
             <div class="pages">
-                <?php
-                    $baseQ = array_merge($_GET, []);
-                    unset($baseQ['p']);
-                ?>
+                <?php $baseQ = array_merge($_GET, []); unset($baseQ['p']); ?>
                 <?php if ($page > 1): ?>
-                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>">
-                        <i class="fa fa-angle-left"></i>
-                    </a>
+                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>"><i class="fa fa-angle-left"></i></a>
                 <?php else: ?>
                     <button class="page-arrow" disabled><i class="fa fa-angle-left"></i></button>
                 <?php endif; ?>
 
                 <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                    <a href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $i]))) ?>"
-                    class="<?= $i === $page ? 'active' : '' ?>">
-                        <?= $i ?>
-                    </a>
+                    <a href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $i]))) ?>" class="<?= $i === $page ? 'active' : '' ?>"><?= $i ?></a>
                 <?php endfor; ?>
 
                 <?php if ($page < $totalPages): ?>
-                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page + 1]))) ?>">
-                        <i class="fa fa-angle-right"></i>
-                    </a>
+                    <a class="page-arrow" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page + 1]))) ?>"><i class="fa fa-angle-right"></i></a>
                 <?php else: ?>
                     <button class="page-arrow" disabled><i class="fa fa-angle-right"></i></button>
                 <?php endif; ?>
             </div>
         </div>
-
     </div>
-
 </div>
 
 <!-- ===================== ADD REQUIREMENT MODAL ===================== -->
 <div id="addModal" class="modal-overlay" onclick="closeRequirementModalOutside(event,'addModal')">
     <div class="modal-box">
-
         <div class="modal-header">
             <div class="modal-header-left">
-                <div class="modal-icon">
-                    <i class="fa fa-file-circle-plus"></i>
-                </div>
+                <div class="modal-icon"><i class="fa fa-file-circle-plus"></i></div>
                 <div>
                     <h3>Assign Program Requirement</h3>
                     <p class="modal-subtitle">Select a program and a requirement from the master list.</p>
                 </div>
             </div>
-            <button class="modal-close" onclick="closeRequirementModal('addModal')">
-                <i class="fa fa-times"></i>
-            </button>
+            <button class="modal-close" onclick="closeRequirementModal('addModal')"><i class="fa fa-times"></i></button>
         </div>
 
         <form id="addForm">
@@ -236,31 +297,22 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <input type="hidden" name="action" value="add">
 
             <div class="modal-body">
-
                 <div class="form-group">
-                    <label class="form-label">
-                        <i class="fa fa-graduation-cap"></i> Program *
-                    </label>
+                    <label class="form-label"><i class="fa fa-graduation-cap"></i> Program *</label>
                     <select name="program_id" class="form-input" required>
                         <option value="">Select Program</option>
                         <?php foreach ($programs as $program): ?>
-                            <option value="<?= (int)$program['id'] ?>">
-                                <?= h($program['program_name']) ?>
-                            </option>
+                            <option value="<?= (int)$program['id'] ?>"><?= h($program['program_name']) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">
-                        <i class="fa fa-file-signature"></i> Document Requirement *
-                    </label>
+                    <label class="form-label"><i class="fa fa-file-signature"></i> Document Requirement *</label>
                     <select name="requirement_id" class="form-input" required>
                         <option value="">Select Requirement</option>
                         <?php foreach ($masterRequirements as $req): ?>
-                            <option value="<?= (int)$req['id'] ?>">
-                                <?= h($req['requirement_name']) ?>
-                            </option>
+                            <option value="<?= (int)$req['id'] ?>"><?= h($req['requirement_name']) ?></option>
                         <?php endforeach; ?>
                     </select>
                     <small style="color:#94a3b8; font-size:11px; margin-top:4px; display:block;">
@@ -274,39 +326,31 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         Is this requirement mandatory?
                     </label>
                 </div>
-
             </div>
 
             <div class="modal-footer">
-                <button type="button" class="btn-secondary" onclick="closeRequirementModal('addModal')">
-                    Cancel
-                </button>
-                <button type="submit" class="btn-confirm">
-                    <i class="fa fa-floppy-disk"></i> Save Assignment
-                </button>
+                <button type="button" class="btn-secondary" onclick="closeRequirementModal('addModal')">Cancel</button>
+                <button type="submit" class="btn-confirm"><i class="fa fa-floppy-disk"></i> Save Assignment</button>
             </div>
         </form>
-
     </div>
 </div>
 
 <script>
 window.PROGRAM_REQUIREMENTS_CSRF = <?= json_encode($csrfToken) ?>;
 
+/* Modal Helpers */
 function openRequirementModal(id) {
     document.getElementById(id).classList.add('open');
     document.body.style.overflow = 'hidden';
 }
-
 function closeRequirementModal(id) {
     document.getElementById(id).classList.remove('open');
     document.body.style.overflow = '';
 }
-
 function closeRequirementModalOutside(e, id) {
     if (e.target.id === id) closeRequirementModal(id);
 }
-
 document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeRequirementModal('addModal');
 });
@@ -316,6 +360,7 @@ function openAddModal() {
     openRequirementModal('addModal');
 }
 
+/* 1. Handle Add Requirement Form Submit */
 document.getElementById('addForm').addEventListener('submit', function (e) {
     e.preventDefault();
     const form = this;
@@ -347,6 +392,37 @@ document.getElementById('addForm').addEventListener('submit', function (e) {
         });
 });
 
+/* 2. Handle File Uploads (Moved OUTSIDE the addForm listener) */
+document.querySelectorAll('.requirement-file-form').forEach(form => {
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        const button = this.querySelector('[type="submit"]');
+        const original = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Uploading...';
+
+        fetch('', { method: 'POST', body: new FormData(this) })
+            .then(async response => {
+                const text = await response.text();
+                try { return JSON.parse(text); }
+                catch { throw new Error('Invalid server response'); }
+            })
+            .then(data => {
+                showToast(data.ok ? 'success' : 'error', data.message);
+                if (data.ok) setTimeout(() => location.reload(), 900);
+            })
+            .catch(error => {
+                console.error(error);
+                showToast('error', 'The file could not be uploaded. Please try again.');
+            })
+            .finally(() => {
+                button.disabled = false;
+                button.innerHTML = original;
+            });
+    });
+});
+
+/* Toast Helper */
 function showToast(type, message) {
     const existing = document.querySelector('.toast');
     if (existing) existing.remove();
