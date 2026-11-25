@@ -1,0 +1,95 @@
+.container .table-card,
+.container .table-section {
+    overflow: hidden;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, .1), 0 2px 4px -1px rgba(0, 0, 0, .06);
+}
+
+.container .table-card table,
+.container table.table-card,
+.container .table-section table,
+.container table.table {
+    width: 100%;
+    margin-bottom: 0;
+    border-collapse: collapse;
+    font-size: .875rem;
+}
+
+.container .table-card thead,
+.container table.table-card thead,
+.container .table-section thead,
+.container table.table thead {
+    border-bottom: 1px solid #e2e8f0;
+    background: #f8fafc;
+}
+
+.container .table-card thead th,
+.container table.table-card thead th,
+.container .table-section thead th,
+.container table.table thead th {
+    padding: 16px 20px;
+    border: 0;
+    color: #94a3b8;
+    font-size: .75rem;
+    font-weight: 600;
+    letter-spacing: .05em;
+    text-align: left;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.container .table-card tbody tr,
+.container table.table-card tbody tr,
+.container .table-section tbody tr,
+.container table.table tbody tr {
+    border-bottom: 1px solid #e2e8f0;
+    transition: background .2s ease;
+}
+
+.container .table-card tbody tr:last-child,
+.container table.table-card tbody tr:last-child,
+.container .table-section tbody tr:last-child,
+.container table.table tbody tr:last-child {
+    border-bottom: 0;
+}
+
+.container .table-card tbody tr:hover,
+.container table.table-card tbody tr:hover,
+.container .table-section tbody tr:hover,
+.container table.table tbody tr:hover {
+    background: #f8fafc;
+}
+
+.container .table-card tbody td,
+.container table.table-card tbody td,
+.container .table-section tbody td,
+.container table.table tbody td {
+    padding: 16px 20px;
+    border: 0;
+    color: #475569;
+    vertical-align: middle;
+}
+
+.container .table-card tbody td:first-child,
+.container table.table-card tbody td:first-child,
+.container .table-section tbody td:first-child,
+.container table.table tbody td:first-child {
+    color: #0f172a;
+    font-weight: 600;
+}
+
+@media (max-width: 900px) {
+    .container .table-card,
+    .container .table-section {
+        overflow-x: auto;
+    }
+
+    .container .table-card table,
+    .container table.table-card,
+    .container .table-section table,
+    .container table.table {
+        min-width: 700px;
+    }
+}
