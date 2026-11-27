@@ -177,7 +177,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         /* 2. Derive "Base Title Batch N" */
         $baseTitle = preg_replace('/\s*Batch\s+\d+\s*$/i', '', $row['program_name']);
         $batchStmt = $pdo->prepare("SELECT program_name FROM programs WHERE program_name LIKE ?");
-        $batchStmt->execute([$baseTitle . ' Batch %']);
+        $batchStmt->execute([addcslashes($baseTitle, '%_\\') . ' Batch %']);
         $maxBatch = 0;
         foreach ($batchStmt->fetchAll(PDO::FETCH_COLUMN) as $existingName) {
             if (preg_match('/Batch\s+(\d+)\s*$/i', $existingName, $m)) {
@@ -217,7 +217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             echo json_encode([
                 'success' => true,
-                'message' => 'Created "' . $newTitle . '". Update its dates before publishing.',
+                'message' => 'Created "' . $newTitle . '". All its dates are set to today as placeholders. Edit it to set the real program and application dates.',
                 'new_id'  => (int)$pdo->lastInsertId(),
             ]);
         } catch (PDOException $e) {
@@ -246,20 +246,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $programTypeNames = array_values(array_diff($programTypeNames, ['Others']));
             $programTypeNames[] = $otherType;
             $programTypeNames = array_values(array_unique($programTypeNames));
-        }
-
-        /* S5: persist the custom type so it's in the canonical list next time */
-        if ($usesOthers && $otherType !== '') {
-            try {
-                $chk = $pdo->prepare("SELECT id FROM program_category WHERE LOWER(category_name) = LOWER(?) LIMIT 1");
-                $chk->execute([$otherType]);
-                if (!$chk->fetchColumn()) {
-                    $pdo->prepare("INSERT INTO program_category (category_name, status) VALUES (?, 'Active')")
-                        ->execute([$otherType]);
-                }
-            } catch (Throwable $e) {
-                error_log('program_category upsert: ' . $e->getMessage());
-            }
         }
 
         /* Validate program types */
@@ -323,7 +309,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $fail('Program end date cannot be before its start date.');
         }
 
-        /* S9: application window is set once, then locked */
+        /* S9: the application window is locked once the first application is received.
+           Until then it stays editable, so a duplicated batch (placeholder dates) can be fixed. */
         $applicationStart = trim((string)($_POST['application_start_date'] ?? '')) ?: null;
         $applicationEnd   = trim((string)($_POST['application_end_date'] ?? '')) ?: null;
         if ($id > 0) {
@@ -333,8 +320,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if (!$applicationWindow) {
                 $fail('Program not found.');
             }
-            $applicationStart = $applicationWindow['application_start_date'];
-            $applicationEnd   = $applicationWindow['application_end_date'];
+            $appCountStmt = $pdo->prepare('SELECT COUNT(*) FROM applications WHERE program_id = ?');
+            $appCountStmt->execute([$id]);
+            if ((int)$appCountStmt->fetchColumn() > 0 || $applicationStart === null || $applicationEnd === null) {
+                $applicationStart = $applicationWindow['application_start_date'];
+                $applicationEnd   = $applicationWindow['application_end_date'];
+            }
         }
         if ($applicationStart === null || $applicationEnd === null ||
             !preg_match($dateRe, $applicationStart) || !preg_match($dateRe, $applicationEnd) ||
@@ -359,6 +350,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $partnerId = (int)($_POST['partner_id'] ?? 0);
         if ($countryId <= 0 || $partnerId <= 0) {
             $fail('Select a country and a partner institution.');
+        }
+        $pc = $pdo->prepare('SELECT country_id FROM partners WHERE id = ?');
+        $pc->execute([$partnerId]);
+        $partnerCountry = $pc->fetchColumn();
+        if ($partnerCountry === false || (int)$partnerCountry !== $countryId) {
+            $fail('The selected partner institution is not in the selected country.');
         }
 
         /* S8: ceiling is optional; must be confirmed by the partner */
@@ -392,6 +389,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         try {
             $warning = null;
+
+            /* S5: persist the custom type only once everything else has validated */
+            if ($usesOthers && $otherType !== '') {
+                $chk = $pdo->prepare("SELECT id FROM program_category WHERE LOWER(category_name) = LOWER(?) LIMIT 1");
+                $chk->execute([$otherType]);
+                if (!$chk->fetchColumn()) {
+                    $pdo->prepare("INSERT INTO program_category (category_name, status) VALUES (?, 'Active')")
+                        ->execute([$otherType]);
+                }
+            }
 
             if ($id > 0) {
                 /* S8: don't block when the ceiling drops below approved count — just warn */
@@ -435,34 +442,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 /* =========================================================
    FETCH DATA
 ========================================================= */
-$partners = $pdo->query("SELECT id, country_id, institution_name FROM partners WHERE LOWER(status) = 'active' ORDER BY institution_name")->fetchAll(PDO::FETCH_ASSOC);
+$partners = $pdo->query("SELECT id, country_id, institution_name, status FROM partners ORDER BY institution_name")->fetchAll(PDO::FETCH_ASSOC);
 
-/* Sync country names from countries_addresses into `countries` */
-$addressRows = $pdo->query("
-    SELECT DISTINCT country_name
-    FROM countries_addresses
-    WHERE LOWER(status) = 'active' AND country_name <> ''
-    ORDER BY country_name
+/* Countries that have at least one partner. Read-only: nothing is written on page load. */
+$countries = $pdo->query("
+    SELECT DISTINCT c.id, c.country_name
+    FROM countries c
+    INNER JOIN partners pr ON pr.country_id = c.id
+    ORDER BY c.country_name
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-$findCountry   = $pdo->prepare("SELECT id FROM countries WHERE country_name = ? AND LOWER(status) = 'active' ORDER BY id ASC LIMIT 1");
-$insertCountry = $pdo->prepare("INSERT INTO countries (country_name, status) VALUES (?, 'Active')");
-
-$countries = [];
-foreach ($addressRows as $addressRow) {
-    $countryName = trim((string)$addressRow['country_name']);
-    $findCountry->execute([$countryName]);
-    $countryId = (int)($findCountry->fetchColumn() ?: 0);
-    if ($countryId <= 0) {
-        $insertCountry->execute([$countryName]);
-        $countryId = (int)$pdo->lastInsertId();
-    }
-    $countries[] = ['id' => $countryId, 'country_name' => $countryName];
+/* Names for the table come from every country so older programs never show N/A */
+$countryMap = [];
+foreach ($pdo->query("SELECT id, country_name FROM countries")->fetchAll(PDO::FETCH_ASSOC) as $c) {
+    $countryMap[(int)$c['id']] = $c['country_name'];
 }
 
-$countryMap = [];
-foreach ($countries as $c) {
-    $countryMap[$c['id']] = $c['country_name'];
+/* "Save & Add Program" on the Partners page links here with ?partner_id= */
+$prefill = null;
+$prefillPartnerId = (int)($_GET['partner_id'] ?? 0);
+foreach ($partners as $pp) {
+    if ($prefillPartnerId > 0 && (int)$pp['id'] === $prefillPartnerId && strtolower((string)$pp['status']) === 'active') {
+        $prefill = ['partner_id' => (int)$pp['id'], 'country_id' => (int)$pp['country_id']];
+    }
 }
 
 /* Server-side search across name and partner */
@@ -470,7 +472,7 @@ $where  = '';
 $params = [];
 if ($search !== '') {
     $where = "WHERE (p.program_name LIKE :q1 OR pr.institution_name LIKE :q2)";
-    $like  = '%' . $search . '%';
+    $like  = '%' . addcslashes($search, '%_\\') . '%';
     $params[':q1'] = $like;
     $params[':q2'] = $like;
 }
@@ -490,6 +492,7 @@ $stmt = $pdo->prepare("
            pr.institution_name,
            (SELECT COUNT(*) FROM applications a
              WHERE a.program_id = p.id AND LOWER(TRIM(a.status)) = 'approved') AS filled_slots,
+           (SELECT COUNT(*) FROM applications a2 WHERE a2.program_id = p.id) AS application_count,
            CASE
              WHEN p.application_end_date IS NULL THEN 0
              WHEN p.application_end_date < CURDATE() THEN 1
@@ -656,7 +659,7 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <div class="pagination">
             <span>Showing <?= count($programs) ?> of <?= $totalPrograms ?> programs</span>
             <div class="pages">
-                <?php $baseQ = $_GET; unset($baseQ['p'], $baseQ['delete']); ?>
+                <?php $baseQ = $_GET; unset($baseQ['p'], $baseQ['delete'], $baseQ['partner_id']); ?>
                 <?php if ($page > 1): ?>
                     <a class="page-arrow" aria-label="Previous page" href="?<?= h(http_build_query(array_merge($baseQ, ['p' => $page - 1]))) ?>"><i class="fa fa-angle-left"></i></a>
                 <?php else: ?>
@@ -806,14 +809,14 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <div class="form-row">
                     <div class="form-group">
                         <label for="edit_application_start_date">Application opens</label>
-                        <input type="date" id="edit_application_start_date" class="form-input" disabled>
+                        <input type="date" name="application_start_date" id="edit_application_start_date" class="form-input">
                     </div>
                     <div class="form-group">
                         <label for="edit_application_end_date">Application closes</label>
-                        <input type="date" id="edit_application_end_date" class="form-input" disabled>
+                        <input type="date" name="application_end_date" id="edit_application_end_date" class="form-input">
                     </div>
                 </div>
-                <small class="form-hint" style="margin-bottom:18px;">Application dates can't be changed after the program is posted. Program dates stay editable.</small>
+                <small class="form-hint" id="edit_app_hint" style="margin-bottom:18px;"></small>
 
                 <div class="form-group">
                     <label for="edit_nature_of_partnership">Nature of Partnership</label>
@@ -969,7 +972,7 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <input type="date" name="application_end_date" id="add_application_end_date" class="form-input" required>
                     </div>
                 </div>
-                <small class="form-hint" style="margin-bottom:18px;">The application closes automatically on its end date and can't be changed after posting.</small>
+                <small class="form-hint" style="margin-bottom:18px;">The application closes automatically on its end date. The window locks once the first application is received.</small>
 
                 <div class="form-group">
                     <label class="form-label" for="add_nature_of_partnership">Nature of Partnership</label>
@@ -1046,7 +1049,9 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
         const cid = String(countryId).trim();
-        const filtered = allPartners.filter(p => String(p.country_id).trim() === cid);
+        const filtered = allPartners.filter(p => String(p.country_id).trim() === cid &&
+            (String(p.status || '').toLowerCase() === 'active' ||
+             (selectedPartnerId && String(p.id) === String(selectedPartnerId))));
         if (filtered.length === 0) {
             select.innerHTML = '<option value="">No partners in this country</option>';
             return;
@@ -1111,6 +1116,19 @@ document.addEventListener('DOMContentLoaded', function () {
         submitForm(this, 'addProgramModal');
     });
 
+    /* Arrived from "Save & Add Program" on the Partners page */
+    const prefill = <?= json_encode($prefill) ?>;
+    if (prefill) {
+        document.getElementById('addProgramForm').reset();
+        syncDegreeOptions(addCampuses, addDegrees);
+        document.getElementById('add_program_country').value = prefill.country_id;
+        populatePartners(prefill.country_id, 'add_program_partner', prefill.partner_id);
+        openModal('addProgramModal');
+        const clean = new URL(window.location.href);
+        clean.searchParams.delete('partner_id');
+        history.replaceState(null, '', clean.toString());
+    }
+
     /* 5. EDIT / DUPLICATE / DELETE */
     document.getElementById('tableBody').addEventListener('click', function (e) {
         const editBtn      = e.target.closest('.edit-btn');
@@ -1149,8 +1167,16 @@ document.addEventListener('DOMContentLoaded', function () {
             document.getElementById('edit_slots_confirmed').checked = (parseInt(data.slots ?? 0, 10) > 0);
             document.getElementById('edit_start').value = data.start_date || '';
             document.getElementById('edit_end').value = data.end_date || '';
-            document.getElementById('edit_application_start_date').value = data.application_start_date || '';
-            document.getElementById('edit_application_end_date').value = data.application_end_date || '';
+            const appLocked = parseInt(data.application_count ?? 0, 10) > 0;
+            ['start', 'end'].forEach(k => {
+                const el = document.getElementById('edit_application_' + k + '_date');
+                el.value = data['application_' + k + '_date'] || '';
+                el.disabled = appLocked;
+                el.required = !appLocked;
+            });
+            document.getElementById('edit_app_hint').textContent = appLocked
+                ? 'Application dates are locked because applications have already been received. Program dates stay editable.'
+                : 'No applications yet, so the application window can still be changed. It locks once the first application is received.';
             document.getElementById('edit_nature_of_partnership').value = data.nature_of_partnership || '';
             document.getElementById('edit_description').value = data.description || '';
 
@@ -1161,7 +1187,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         if (duplicateBtn) {
-            if (!confirm('Create a new batch from this program? Its dates will be cleared.')) return;
+            if (!confirm('Create a new batch from this program? Its dates will be reset to today; set the real dates afterwards.')) return;
 
             const formData = new FormData();
             formData.append('action', 'duplicate');

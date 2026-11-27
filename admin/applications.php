@@ -3,6 +3,10 @@ require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/roles.php';
 require_once __DIR__ . '/role_helpers.php';
 
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 if (!isset($_SESSION['user_id'])) {
     header('Location: ../public/login.php');
     exit();
@@ -20,8 +24,10 @@ $csrfToken = $_SESSION['csrf_token'];
 
 $pdo = db();
 
-function h($value): string {
-    return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+if (!function_exists('h')) {
+    function h($value): string {
+        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+    }
 }
 
 /* =========================
@@ -29,10 +35,20 @@ function h($value): string {
 ========================= */
 $search        = trim($_GET['search'] ?? '');
 $campusId      = (int)($_GET['campus'] ?? 0);
+
+/* S1: a campus coordinator only sees their own campus.
+   ASSUMES the campus is stored in $_SESSION['campus_id'] - change the key if yours differs. */
+$scopedCampusId = (!isSuperAdmin() && !empty($_SESSION['campus_id'])) ? (int)$_SESSION['campus_id'] : 0;
+if ($scopedCampusId > 0) {
+    $campusId = $scopedCampusId;
+}
 $degreeProgram = trim($_GET['degree_program'] ?? '');
 $applicantType = trim($_GET['applicant_type'] ?? '');
 $program       = trim($_GET['program'] ?? '');
-$view          = $_GET['view'] ?? 'all';
+$view          = (string)($_GET['view'] ?? 'all');
+if (!in_array($view, ['all', 'new', 'review'], true)) {
+    $view = 'all';
+}
 $sort          = $_GET['sort'] ?? 'created_at';
 $order         = strtoupper($_GET['order'] ?? 'DESC') === 'ASC' ? 'ASC' : 'DESC';
 
@@ -71,7 +87,7 @@ if ($search !== '') {
         CONCAT(u.first_name,' ',u.last_name) LIKE ? OR
         u.email LIKE ?
     )";
-    $like = "%$search%";
+    $like = '%' . addcslashes($search, '%_\\') . '%';
     $params = array_merge($params, [$like, $like, $like, $like, $like]);
 }
 
@@ -114,18 +130,28 @@ $countSql = "
 $countStmt = $pdo->prepare($countSql);
 $countStmt->execute($params);
 $totalApplications = (int)$countStmt->fetchColumn();
+$totalPages = max(1, (int)ceil($totalApplications / $limit));
+if ($page > $totalPages) {
+    $page   = $totalPages;
+    $offset = ($page - 1) * $limit;
+}
 
 /* =========================
    FILTER OPTIONS
 ========================= */
-$campuses = $pdo->query("SELECT id, campus_name FROM campuses WHERE status = 'active' ORDER BY campus_name")->fetchAll(PDO::FETCH_ASSOC);
+$campuses = $pdo->query("SELECT id, campus_name FROM campuses WHERE LOWER(status) = 'active' ORDER BY campus_name")->fetchAll(PDO::FETCH_ASSOC);
+if ($scopedCampusId > 0) {
+    $campuses = array_values(array_filter($campuses, static function ($c) use ($scopedCampusId) {
+        return (int)$c['id'] === $scopedCampusId;
+    }));
+}
 
 $degreeQuery = $pdo->prepare("
     SELECT DISTINCT degree_program
     FROM (
         SELECT dp.program_name AS degree_program
         FROM degree_programs dp
-        WHERE dp.status = 'active' AND (? = 0 OR dp.campus_id = ?)
+        WHERE LOWER(dp.status) = 'active' AND (? = 0 OR dp.campus_id = ?)
         UNION
         SELECT u.program AS degree_program
         FROM users u
@@ -171,14 +197,13 @@ LEFT JOIN programs p ON a.program_id = p.id
 LEFT JOIN campuses campus ON campus.id = u.campus_id
 LEFT JOIN countries c ON c.id = p.country_id
 $where
-ORDER BY $sortColumn $order
+ORDER BY $sortColumn $order, a.id DESC
 LIMIT $limit OFFSET $offset
 ";
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $applications = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$totalPages = max(1, ceil($totalApplications / $limit));
 
 function sortHeader(string $label, string $col, string $sort, string $order): string {
     $isActive = $sort === $col;
@@ -194,6 +219,14 @@ function appStatusClass(string $status): string {
     if (in_array($s, ['approved', 'completed'], true)) return 'status-approved';
     if (in_array($s, ['rejected', 'cancelled', 'declined'], true)) return 'status-rejected';
     if (in_array($s, ['submitted', 'under_review', 'pending'], true)) return 'status-submitted';
+    return 'status-submitted';
+}
+
+/* S22: show at a glance whether an applicant's requirements are complete */
+function docStatusClass(string $status): string {
+    $s = strtolower(str_replace(' ', '_', $status));
+    if (in_array($s, ['complete', 'completed', 'verified', 'approved'], true)) return 'status-approved';
+    if (in_array($s, ['incomplete', 'missing', 'rejected'], true)) return 'status-rejected';
     return 'status-submitted';
 }
 ?>
@@ -253,17 +286,21 @@ function appStatusClass(string $status): string {
         <div class="search-wrap">
             <i class="fa fa-search"></i>
             <input type="text" id="searchInput" name="search" form="filterForm"
-                   placeholder="Search by name / program"
+                   placeholder="Search by applicant name / email / program"
                    value="<?= h($search) ?>">
         </div>
         <div class="tabs">
-            <a href="?view=all"    class="<?= $view === 'all'    ? 'active' : '' ?>">All</a>
-            <a href="?view=new"    class="<?= $view === 'new'    ? 'active' : '' ?>">New</a>
-            <a href="?view=review" class="<?= $view === 'review' ? 'active' : '' ?>">Review</a>
+            <?php $tabQ = $_GET; unset($tabQ['p'], $tabQ['view']); ?>
+            <?php foreach (['all' => 'All', 'new' => 'New', 'review' => 'Review'] as $tabKey => $tabLabel): ?>
+                <a href="?<?= h(http_build_query(array_merge($tabQ, ['view' => $tabKey]))) ?>" class="<?= $view === $tabKey ? 'active' : '' ?>"><?= $tabLabel ?></a>
+            <?php endforeach; ?>
         </div>
     </div>
 
     <form method="GET" class="filter-bar" id="filterForm">
+        <?php if (isset($_GET['page']) && is_scalar($_GET['page'])): ?>
+            <input type="hidden" name="page" value="<?= h($_GET['page']) ?>">
+        <?php endif; ?>
         <input type="hidden" name="view"  value="<?= h($view) ?>">
         <input type="hidden" name="sort"  value="<?= h($sort) ?>">
         <input type="hidden" name="order" value="<?= h($order) ?>">
@@ -307,6 +344,7 @@ function appStatusClass(string $status): string {
                     <th><?= sortHeader('Program',         'program',        $sort, $order) ?></th>
                     <th><?= sortHeader('Degree Program',  'degree_program', $sort, $order) ?></th>
                     <th><?= sortHeader('Status',          'status',         $sort, $order) ?></th>
+                    <th>Documents</th>
                     <th><?= sortHeader('Country',         'country',        $sort, $order) ?></th>
                     <th><?= sortHeader('Date',            'created_at',     $sort, $order) ?></th>
                     <th>Actions</th>
@@ -324,6 +362,7 @@ function appStatusClass(string $status): string {
                         }
                         $statusRaw   = (string)($a['status'] ?? 'unknown');
                         $statusLabel = ucwords(str_replace('_', ' ', $statusRaw));
+                        $isPending   = in_array(strtolower(str_replace(' ', '_', $statusRaw)), ['submitted', 'under_review', 'pending'], true);
                     ?>
                 <tr>
                     <td>
@@ -342,6 +381,14 @@ function appStatusClass(string $status): string {
                             <?= h($statusLabel) ?>
                         </span>
                     </td>
+                    <td>
+                        <?php $ds = (string)($a['documents_status'] ?? ''); ?>
+                        <?php if ($ds !== ''): ?>
+                            <span class="status-badge <?= h(docStatusClass($ds)) ?>"><?= h(ucwords(str_replace('_', ' ', $ds))) ?></span>
+                        <?php else: ?>
+                            <span style="color:#94a3b8;">—</span>
+                        <?php endif; ?>
+                    </td>
                     <td><?= h($a['country']) ?></td>
                     <td><?= date('M d, Y', strtotime($a['created_at'])) ?></td>
                     <td>
@@ -351,11 +398,11 @@ function appStatusClass(string $status): string {
                             </button>
 
                             <!-- S17/S22: Document review entry point (requirements checklist) -->
-                            <a class="review-link" href="?page=application_documents&id=<?= (int)$a['id'] ?>">
+                            <a class="review-link" href="?page=documents&application_id=<?= (int)$a['id'] ?>">
                                 <i class="fa-solid fa-clipboard-check"></i> Review
                             </a>
 
-                            <?php if (isApprover() || isSuperAdmin()): ?>
+                            <?php if ($isPending && (isApprover() || isSuperAdmin())): ?>
                                 <button class="action-btn edit-btn" title="Approve" onclick="confirmAction('approve', <?= (int)$a['id'] ?>)">
                                     <i class="fa fa-check"></i>
                                 </button>
@@ -375,7 +422,7 @@ function appStatusClass(string $status): string {
                 <?php endforeach; ?>
             <?php else: ?>
                 <tr>
-                    <td colspan="7">
+                    <td colspan="8">
                         <div class="empty-state">
                             <div class="empty-state-icon">
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -493,6 +540,16 @@ function appStatusClass(string $status): string {
         });
     }
 
+    /* S23: changing the campus resets the degree program and reloads its list */
+    var campusFilter = document.getElementById('campusFilter');
+    if (campusFilter) {
+        campusFilter.addEventListener('change', function () {
+            var degree = document.querySelector('select[name="degree_program"]');
+            if (degree) degree.value = '';
+            document.getElementById('filterForm').submit();
+        });
+    }
+
     /* View modal */
     window.openModal = function (data) {
         try {
@@ -501,12 +558,13 @@ function appStatusClass(string $status): string {
             var fmt = function (v) { return (v !== null && v !== undefined && v !== '') ? v : '—'; };
             var fmtDate = function (v) {
                 if (!v) return '—';
-                return new Date(v).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+                return new Date(String(v).replace(' ', 'T')).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
             };
             var statusHtml = function (status) {
                 if (!status) return '—';
-                var cls = status.toLowerCase().replace(/\s+/g, '-').replace(/-/g, '_');
-                return '<span class="status-badge status-' + cls + '">' + status + '</span>';
+                var cls = String(status).toLowerCase().replace(/[^a-z0-9]+/g, '_');
+                var safe = String(status).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                return '<span class="status-badge status-' + cls + '">' + safe + '</span>';
             };
             document.getElementById('m-name').textContent         = fmt(data.applicant_name);
             document.getElementById('m-email').textContent        = fmt(data.applicant_email);
@@ -571,7 +629,7 @@ function appStatusClass(string $status): string {
         var routeMap = { approve: 'application_approve.php', reject: 'application_reject.php', delete: 'application_delete.php' };
         var fd = new FormData();
         fd.append('id', pendingId);
-        fd.append('csrf_token', '<?= $csrfToken ?>');
+        fd.append('csrf_token', <?= json_encode($csrfToken) ?>);
         fetch(routeMap[pendingAction], { method: 'POST', body: fd })
             .then(function (res) { return res.text().then(function (t) { try { return JSON.parse(t); } catch (e) { throw new Error('Invalid server response'); } }); })
             .then(function (data) {

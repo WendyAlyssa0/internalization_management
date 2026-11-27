@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/application_action_common.php';
+handleApplicationAction('application_approve');
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/roles.php';
 require_once __DIR__ . '/role_helpers.php';

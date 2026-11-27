@@ -55,7 +55,11 @@ $offset = ($page - 1) * $limit;
 
 /* ROLE ACCESS: non-admins only see their own uploads */
 $isAdminRole = in_array($role, ['admin', 'super admin', 'ad', 'sa'], true);
-$like = "%$search%";
+$like = '%' . addcslashes($search, '%_\\') . '%';
+
+/* S1: a campus coordinator only sees uploads from their own campus.
+   ASSUMES $_SESSION['campus_id'] (same key as applications.php). */
+$scopedCampusId = ($isAdminRole && !isSuperAdmin() && !empty($_SESSION['campus_id'])) ? (int)$_SESSION['campus_id'] : 0;
 
 /* =========================================================
    SOURCE A: documents table (general uploaded documents)
@@ -89,6 +93,10 @@ if ($view === 'new') {
 if ($applicationId > 0) {
     $whereA .= " AND d.application_id = :application_id";
     $paramsA[':application_id'] = $applicationId;
+}
+if ($scopedCampusId > 0) {
+    $whereA .= " AND u.campus_id = :campus_id";
+    $paramsA[':campus_id'] = $scopedCampusId;
 }
 
 $docsFromDocuments = [];
@@ -147,13 +155,16 @@ if ($view !== 'new') {
             $whereB .= " AND $extExpr = LOWER(:type)";
             $paramsB[':type'] = $type;
         }
-        if ($view === 'new') {
-            $whereB .= " AND LOWER(COALESCE(ud.status, 'pending')) = 'pending'";
-        }
-        if ($applicationId > 0) {
-            $whereB .= " AND ud.application_id = :application_id";
-            $paramsB[':application_id'] = $applicationId;
-        }
+    }
+    /* BUG FIX: these two filters used to sit inside the type check above, so
+       "Review documents" only filtered applicant uploads when a type was also chosen. */
+    if ($applicationId > 0) {
+        $whereB .= " AND ud.application_id = :application_id";
+        $paramsB[':application_id'] = $applicationId;
+    }
+    if ($scopedCampusId > 0) {
+        $whereB .= " AND u.campus_id = :campus_id";
+        $paramsB[':campus_id'] = $scopedCampusId;
     }
 
     try {
@@ -202,7 +213,12 @@ $documents  = array_slice($allDocs, $offset, $limit);
 ========================= */
 $canReview = isApprover() || isAdmin() || isSuperAdmin();
 $canDelete = canManageSystem() || isAdmin() || isSuperAdmin();
-$applicationReviews = $pdo->query("
+/* BUG FIX: this list used to load for every logged-in user, exposing all applicants' names.
+   Now admins only, and coordinators only see their own campus. */
+$applicationReviews = [];
+if ($isAdminRole) {
+$reviewWhere = $scopedCampusId > 0 ? 'WHERE u.campus_id = ?' : '';
+$stmtR = $pdo->prepare("
     SELECT a.id, a.applicant_id, a.program_id, a.status,
            CONCAT_WS(' ', u.first_name, u.last_name) AS applicant,
            p.program_name,
@@ -216,10 +232,14 @@ $applicationReviews = $pdo->query("
         ON ud.application_id = a.id
        AND ud.user_id = a.applicant_id
        AND ud.requirement_id = pr.requirement_id
+    $reviewWhere
     GROUP BY a.id, a.applicant_id, a.program_id, a.status, u.first_name, u.last_name, p.program_name
     ORDER BY a.created_at DESC
     LIMIT 100
-")->fetchAll(PDO::FETCH_ASSOC);
+");
+$stmtR->execute($scopedCampusId > 0 ? [$scopedCampusId] : []);
+$applicationReviews = $stmtR->fetchAll(PDO::FETCH_ASSOC);
+}
 ?>
 
 <link rel="stylesheet" href="../asset/css/applications.css">
@@ -230,6 +250,7 @@ $applicationReviews = $pdo->query("
     <p>Handles all uploaded documents, including applicant requirement uploads.</p>
 </div>
 
+<?php if ($isAdminRole): ?>
 <div class="table-section" style="margin-bottom:20px;">
     <h3 style="padding:16px 20px;margin:0;">Application requirement review</h3>
     <table class="table-card">
@@ -248,6 +269,7 @@ $applicationReviews = $pdo->query("
         </tbody>
     </table>
 </div>
+<?php endif; ?>
 <?php if ($applicationId > 0): ?>
     <p style="margin:0 0 12px;"><a href="?page=documents">Show documents from all applications</a></p>
 <?php endif; ?>
@@ -256,7 +278,7 @@ $applicationReviews = $pdo->query("
 <div class="toolbar">
     <div class="search-wrap">
         <i class="fa fa-search"></i>
-        <input type="text" id="searchInput" placeholder="Search documents..." value="<?= h($search) ?>">
+        <input type="text" id="searchInput" placeholder="Search by uploader / title / type" value="<?= h($search) ?>">
     </div>
 </div>
 

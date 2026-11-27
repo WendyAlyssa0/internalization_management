@@ -1,98 +1,98 @@
 <?php
-require_once __DIR__ . '/../../config/db.php';
+/**
+ * Shared logic for application_approve.php / application_reject.php / application_delete.php.
+ * Every request: POST only, logged in, valid CSRF token, role allowed, campus allowed.
+ * Always answers with JSON {success, message}.
+ */
+require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/roles.php';
+require_once __DIR__ . '/role_helpers.php';
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+function applicationActionReply(bool $success, string $message, int $httpCode = 200): void
+{
+    while (ob_get_level() > 0) { ob_end_clean(); }
+    http_response_code($httpCode);
+    header('Content-Type: application/json');
+    echo json_encode(['success' => $success, 'message' => $message]);
+    exit;
 }
 
-header('Content-Type: application/json');
-
-if (!isset($_SESSION['user_id'])) {
-    echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-    exit();
-}
-
-$role = strtolower(trim((string)($_SESSION['user_role'] ?? '')));
-if (!in_array($role, [
-    'admin',
-    'super admin',
-    'campus coordinator',
-    'ovplia staff',
-    'approving official',
-    'bor secretary',
-], true)) {
-    echo json_encode(['success' => false, 'message' => 'Forbidden']);
-    exit();
-}
-
-$pdo    = db();
-$action = $_POST['action'] ?? '';
-$id     = (int)($_POST['id'] ?? 0);
-
-if (!$id) {
-    echo json_encode(['success' => false, 'message' => 'Invalid application ID']);
-    exit();
-}
-
-try {
-    switch ($action) {
-
-       case 'approve':
-    $stmt = $pdo->prepare("
-        UPDATE applications
-        SET status = 'approved', reviewed_at = NOW()
-        WHERE id = ?
-    ");
-    $stmt->execute([$id]);
-       $application = $pdo->prepare('SELECT applicant_id FROM applications WHERE id = ? LIMIT 1');
-       $application->execute([$id]);
-       $applicantId = (int)$application->fetchColumn();
-       if ($applicantId > 0) {
-           $pdo->prepare("
-               INSERT INTO notifications (user_id, type, title, message, is_read, created_at)
-               VALUES (?, 'approval', 'Application Approved', 'Your application has been approved.', 0, NOW())
-           ")->execute([$applicantId]);
-       }
-       $pdo->prepare("
-           INSERT INTO audit_trail (user_id, action, description, created_at)
-           VALUES (?, 'approve_application', ?, NOW())
-       ")->execute([(int)$_SESSION['user_id'], 'Application #' . $id . ' was approved.']);
-    echo json_encode(['success' => true, 'message' => 'Application approved successfully.']);
-    break;
-
-    case 'reject':
-        $stmt = $pdo->prepare("
-            UPDATE applications
-            SET status = 'rejected', reviewed_at = NOW()
-            WHERE id = ?
-        ");
-        $stmt->execute([$id]);
-        $application = $pdo->prepare('SELECT applicant_id FROM applications WHERE id = ? LIMIT 1');
-        $application->execute([$id]);
-        $applicantId = (int)$application->fetchColumn();
-        if ($applicantId > 0) {
-            $pdo->prepare("
-                INSERT INTO notifications (user_id, type, title, message, is_read, created_at)
-                VALUES (?, 'rejected', 'Application Rejected', 'Your application was rejected.', 0, NOW())
-            ")->execute([$applicantId]);
-        }
-        $pdo->prepare("
-            INSERT INTO audit_trail (user_id, action, description, created_at)
-            VALUES (?, 'reject_application', ?, NOW())
-        ")->execute([(int)$_SESSION['user_id'], 'Application #' . $id . ' was rejected.']);
-        echo json_encode(['success' => true, 'message' => 'Application rejected.']);
-        break;
-
-        case 'delete':
-            $stmt = $pdo->prepare("DELETE FROM applications WHERE id = ?");
-            $stmt->execute([$id]);
-            echo json_encode(['success' => true, 'message' => 'Application deleted.']);
-            break;
-
-        default:
-            echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+function handleApplicationAction(string $action): void
+{
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
     }
 
-} catch (Exception $e) {
-    echo json_encode(['success' => false, 'message' => 'Server error: ' . $e->getMessage()]);
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        applicationActionReply(false, 'Invalid request method.', 405);
+    }
+    if (!isset($_SESSION['user_id'])) {
+        applicationActionReply(false, 'Your session has expired. Please log in again.', 401);
+    }
+    if (!hash_equals((string)($_SESSION['csrf_token'] ?? ''), (string)($_POST['csrf_token'] ?? ''))) {
+        applicationActionReply(false, 'Invalid CSRF token. Please refresh the page and try again.', 403);
+    }
+
+    /* Same rules the buttons on applications.php use */
+    $allowed = $action === 'delete'
+        ? canManageSystem()
+        : (isApprover() || isSuperAdmin());
+    if (!$allowed) {
+        applicationActionReply(false, 'You do not have permission to do that.', 403);
+    }
+
+    $id = (int)($_POST['id'] ?? 0);
+    if ($id <= 0) {
+        applicationActionReply(false, 'Invalid application.', 400);
+    }
+
+    $pdo = db();
+
+    $stmt = $pdo->prepare("
+        SELECT a.id, a.status, u.campus_id
+        FROM applications a
+        LEFT JOIN users u ON u.id = a.applicant_id
+        WHERE a.id = ?
+    ");
+    $stmt->execute([$id]);
+    $app = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$app) {
+        applicationActionReply(false, 'Application not found.', 404);
+    }
+
+    /* S1: a campus coordinator may only act on their own campus.
+       ASSUMES $_SESSION['campus_id'] - same key as applications.php. */
+    if (!isSuperAdmin() && !empty($_SESSION['campus_id']) && (int)$app['campus_id'] !== (int)$_SESSION['campus_id']) {
+        applicationActionReply(false, 'This application belongs to another campus.', 403);
+    }
+
+    try {
+        if ($action === 'delete') {
+            $pdo->prepare("DELETE FROM applications WHERE id = ?")->execute([$id]);
+            applicationActionReply(true, 'Application deleted.');
+        }
+
+        $newStatus = $action === 'approve' ? 'approved' : 'rejected';
+
+        /* The WHERE guard makes this atomic: two admins clicking at once cannot both succeed. */
+        $upd = $pdo->prepare("
+            UPDATE applications
+            SET status = ?, reviewed_at = NOW()
+            WHERE id = ? AND LOWER(TRIM(status)) IN ('submitted', 'under_review', 'pending')
+        ");
+        $upd->execute([$newStatus, $id]);
+
+        if ($upd->rowCount() === 0) {
+            $current = ucwords(str_replace('_', ' ', (string)$app['status']));
+            applicationActionReply(false, "This application is already {$current} and can no longer be changed.", 409);
+        }
+
+        applicationActionReply(true, $action === 'approve' ? 'Application approved.' : 'Application rejected.');
+    } catch (PDOException $e) {
+        error_log("application {$action}: " . $e->getMessage());
+        $msg = $action === 'delete'
+            ? 'Cannot delete this application. It may have uploaded documents or other records linked to it.'
+            : 'Database error. Please check the server log.';
+        applicationActionReply(false, $msg, 500);
+    }
 }
