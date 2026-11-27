@@ -168,6 +168,13 @@ if (!function_exists('h')) {
                         </td>
                         <td>
                             <div class="actions">
+                                <button type="button" class="action-btn edit-degree-btn"
+                                        title="Edit degree program"
+                                        data-id="<?= (int)$program['id'] ?>"
+                                        data-campus-id="<?= (int)$program['campus_id'] ?>"
+                                        data-program-name="<?= h($programName) ?>">
+                                    <i class="fa fa-pen"></i>
+                                </button>
                                 <form method="post" data-ajax style="display:inline;">
                                     <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
                                     <input type="hidden" name="action" value="toggle">
@@ -220,6 +227,7 @@ if (!function_exists('h')) {
             <form method="post" data-ajax id="createProgramForm">
                 <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
                 <input type="hidden" name="action" value="save">
+                <input type="hidden" name="id" value="">
 
                 <div class="form-section-title">Degree Program Details</div>
                 <div class="form-grid">
@@ -295,6 +303,28 @@ if (!function_exists('h')) {
     }
 
     bindModal('createModal', 'openModalBtn', 'closeCreateModalBtn', 'cancelCreateModalBtn');
+
+    document.getElementById('openModalBtn').addEventListener('click', function () {
+        var form = document.getElementById('createProgramForm');
+        form.reset();
+        form.elements.id.value = '';
+        document.getElementById('createModalTitle').textContent = 'Add Degree Program';
+        form.querySelector('button[type="submit"]').innerHTML = '<i class="fa-solid fa-plus"></i> Add Degree Program';
+    });
+
+    document.getElementById('tableBody').addEventListener('click', function (event) {
+        var button = event.target.closest('.edit-degree-btn');
+        if (!button) return;
+
+        var form = document.getElementById('createProgramForm');
+        form.reset();
+        form.elements.id.value = button.dataset.id;
+        form.elements.campus_id.value = button.dataset.campusId;
+        form.elements.program_name.value = button.dataset.programName;
+        document.getElementById('createModalTitle').textContent = 'Edit Degree Program';
+        form.querySelector('button[type="submit"]').innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save Changes';
+        openModal(document.getElementById('createModal'));
+    });
 
     document.addEventListener('keydown', function(e) {
         if (e.key !== 'Escape') return;

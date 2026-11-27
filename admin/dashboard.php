@@ -24,7 +24,7 @@ $validPages = [
     'home',
 
     // Master Data
-    'countries_addresses', 'partners', 'agreement_types', 'program_category', 'degree_programs',
+    'countries', 'countries_addresses', 'partners', 'agreement_types', 'program_category', 'degree_programs',
 
     // Program Management
     'programs', 'requirements', 'forms', 'program_requirements',
@@ -78,6 +78,7 @@ $fullName  = trim("$firstName $lastName");
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PSU Internationalization Management System</title>
     <link rel="stylesheet" href="../asset/css/dashboard.css">
+    <link rel="stylesheet" href="../asset/css/sidebar_theme.css">
     <link rel="stylesheet" href="../asset/css/report.css">
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
@@ -118,6 +119,7 @@ endif;
 ========================= */
 switch ($page) {
     case 'home':                 require __DIR__ . '/reports.php'; break;
+    case 'countries':            require __DIR__ . '/countries.php'; break;
     case 'countries_addresses':  require __DIR__ . '/countries_addresses.php'; break;
     case 'partners':             require __DIR__ . '/partners.php'; break;
     case 'agreement_types':      require __DIR__ . '/agreement_types.php'; break;

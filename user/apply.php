@@ -1,5 +1,7 @@
 <?php
 // apply.php — handles ?page=apply&program_id=X
+require_once __DIR__ . '/../config/program_eligibility.php';
+
 if (!isset($pdo, $userId, $user) || !($pdo instanceof PDO)) {
     header('Location: dashboard.php?page=available_programs');
     exit;
@@ -16,17 +18,20 @@ if ($programId <= 0) {
 
 // Verify program is eligible for this user
 $stmt = $pdo->prepare("
-    SELECT p.id, p.program_name, p.description, p.start_date, p.end_date,
+    SELECT p.id, p.program_name, p.description, p.start_date, p.end_date, p.mobility_direction,
            country.country_name
     FROM programs p
+    INNER JOIN users applicant ON applicant.id = ?
+    LEFT JOIN degree_programs degree
+        ON degree.campus_id = applicant.campus_id
+       AND degree.program_name = applicant.program
     LEFT JOIN countries country ON country.id = p.country_id
     WHERE p.id = ?
       AND p.status IN ('Active', 'Upcoming')
-      AND p.end_date >= CURDATE()
-      AND p.eligible_account_type = ?
-      AND (p.eligible_department = 'All Departments' OR p.eligible_department = ?)
+      AND " . programApplicationWindowSql() . "
+      AND " . programEligibilitySql() . "
 ");
-$stmt->execute([$programId, $user['account_type'] ?? '', $user['department'] ?? '']);
+$stmt->execute([$userId, $programId]);
 $program = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$program) {
@@ -50,14 +55,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_application'])
         try {
             // CRITICAL: program_id MUST be stored here so documents.php can find it
             $ins = $pdo->prepare("
-                INSERT INTO applications (applicant_id, program_id, status, created_at, updated_at)
-                VALUES (?, ?, 'pending', NOW(), NOW())
+                INSERT INTO applications (applicant_id, program_id, mobility_type, status, created_at, updated_at)
+                VALUES (?, ?, ?, 'submitted', NOW(), NOW())
             ");
-            $ins->execute([$userId, $programId]);
+            $mobilityType = strtolower((string)$program['mobility_direction']) === 'inbound' ? 'Inbound' : 'Outbound';
+            $ins->execute([$userId, $programId, $mobilityType]);
 
             $message = 'Application submitted successfully! You will be notified once it is reviewed.';
             $msgType = 'success';
-            $existing = ['id' => (int)$pdo->lastInsertId(), 'status' => 'pending'];
+            $existing = ['id' => (int)$pdo->lastInsertId(), 'status' => 'submitted'];
         } catch (PDOException $e) {
             error_log('Application insert failed: ' . $e->getMessage());
             $message = 'Could not submit your application. Please try again.';

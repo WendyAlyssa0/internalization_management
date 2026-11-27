@@ -351,10 +351,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($countryId <= 0 || $partnerId <= 0) {
             $fail('Select a country and a partner institution.');
         }
-        $pc = $pdo->prepare('SELECT country_id FROM partners WHERE id = ?');
+        $pc = $pdo->prepare('SELECT country_id, institution_name FROM partners WHERE id = ?');
         $pc->execute([$partnerId]);
-        $partnerCountry = $pc->fetchColumn();
-        if ($partnerCountry === false || (int)$partnerCountry !== $countryId) {
+        $partner = $pc->fetch(PDO::FETCH_ASSOC);
+        if (!$partner || (int)$partner['country_id'] !== $countryId) {
             $fail('The selected partner institution is not in the selected country.');
         }
 
@@ -379,6 +379,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             'mobility_direction'         => $direction,
             'country_id'                 => $countryId,
             'partner_id'                 => $partnerId,
+            'partner_institution'        => $partner['institution_name'],
             'slots'                      => $slots,
             'start_date'                 => $startDate,
             'end_date'                   => $endDate,
@@ -494,8 +495,7 @@ $stmt = $pdo->prepare("
              WHERE a.program_id = p.id AND LOWER(TRIM(a.status)) = 'approved') AS filled_slots,
            (SELECT COUNT(*) FROM applications a2 WHERE a2.program_id = p.id) AS application_count,
            CASE
-             WHEN p.application_end_date IS NULL THEN 0
-             WHEN p.application_end_date < CURDATE() THEN 1
+             WHEN COALESCE(p.application_end_date, p.end_date) < CURDATE() THEN 1
              ELSE 0
            END AS applications_closed
     FROM programs p

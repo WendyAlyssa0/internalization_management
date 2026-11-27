@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/../config/program_eligibility.php';
+
 if (!isset($pdo, $userId, $user) || !($pdo instanceof PDO)) {
     header('Location: dashboard.php?page=available_programs');
     exit;
@@ -6,9 +8,6 @@ if (!isset($pdo, $userId, $user) || !($pdo instanceof PDO)) {
 
 $message = '';
 $msgType = '';
-
-$applicantDepartment = (string)($user['department'] ?? '');
-$applicantAccountType = (string)($user['account_type'] ?? '');
 
 /* Fetch available programs for the grid */
 try {
@@ -26,15 +25,18 @@ try {
                 WHERE a.applicant_id = ? AND a.program_id = p.id
             ) AS already_applied
         FROM programs p
+        INNER JOIN users applicant ON applicant.id = ?
+        LEFT JOIN degree_programs degree
+            ON degree.campus_id = applicant.campus_id
+           AND degree.program_name = applicant.program
         LEFT JOIN countries country ON country.id = p.country_id
         WHERE p.status IN ('Active', 'Upcoming')
-        AND p.end_date >= CURDATE()
-        AND p.eligible_account_type = ?
-        AND (p.eligible_department = 'All Departments' OR p.eligible_department = ?)
+        AND " . programApplicationWindowSql() . "
+        AND " . programEligibilitySql() . "
         ORDER BY p.start_date, p.program_name
     ");
 
-    $stmt->execute([$userId, $applicantAccountType, $applicantDepartment]);
+    $stmt->execute([$userId, $userId]);
     $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 } catch (PDOException $e) {

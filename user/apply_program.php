@@ -8,6 +8,7 @@ if (!isset($pdo, $userId) || !($pdo instanceof PDO)) {
     header('Location: dashboard.php?page=available_programs');
     exit;
 }
+require_once __DIR__ . '/../config/program_eligibility.php';
 
 /* =========================================================
    CONFIGURE THESE IF YOUR SCHEMA DIFFERS
@@ -27,12 +28,6 @@ $programId = (int)($_POST['program_id'] ?? $_GET['program_id'] ?? 0);
 $action    = (string)($_POST['action'] ?? $_GET['action'] ?? 'start');
 
 $flash = null;
-$departmentStmt = $pdo->prepare('SELECT department, account_type FROM users WHERE id = ?');
-$departmentStmt->execute([$userId]);
-$applicant = $departmentStmt->fetch(PDO::FETCH_ASSOC) ?: [];
-$applicantDepartment = (string)($applicant['department'] ?? '');
-$applicantAccountType = (string)($applicant['account_type'] ?? '');
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_ok()) {
         $flash = ['type' => 'error', 'msg' => 'Session expired. Please try again.'];
@@ -40,14 +35,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $flash = ['type' => 'error', 'msg' => 'Invalid program selected.'];
     } else {
         $stmt = $pdo->prepare("
-            SELECT p.id, p.program_name, p.status, p.end_date
+            SELECT p.id, p.program_name, p.status, p.end_date, p.mobility_direction
             FROM programs p
+            INNER JOIN users applicant ON applicant.id = ?
+            LEFT JOIN degree_programs degree
+                ON degree.campus_id = applicant.campus_id
+               AND degree.program_name = applicant.program
             WHERE p.id = ?
-              AND p.eligible_department IN ('All Departments', ?)
-              AND p.eligible_account_type = ?
+              AND " . programApplicationWindowSql() . "
+              AND " . programEligibilitySql() . "
             LIMIT 1
         ");
-        $stmt->execute([$programId, $applicantDepartment, $applicantAccountType]);
+        $stmt->execute([$userId, $programId]);
         $program = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$program) {
@@ -84,11 +83,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             try {
-                $ins = $pdo->prepare("INSERT INTO applications ({$APP_USER_COL}, program_id, status, created_at) VALUES (?, ?, 'draft', NOW())");
-                $ins->execute([$userId, $programId]);
+                $mobilityType = strtolower((string)$program['mobility_direction']) === 'inbound' ? 'Inbound' : 'Outbound';
+                $ins = $pdo->prepare("INSERT INTO applications ({$APP_USER_COL}, program_id, mobility_type, status, created_at) VALUES (?, ?, ?, 'submitted', NOW())");
+                $ins->execute([$userId, $programId, $mobilityType]);
                 $newId = (int)$pdo->lastInsertId();
-                $_SESSION['apply_flash'] = ['type' => 'success', 'msg' => 'Application started. Fill in your details.'];
-                header('Location: ?page=apply&program_id=' . $programId . '&id=' . $newId);
+                $_SESSION['apply_flash'] = ['type' => 'success', 'msg' => 'Application submitted successfully.'];
+                header('Location: ?page=my_applications&id=' . $newId);
                 exit;
             } catch (PDOException $e) {
                 error_log('apply_program insert: ' . $e->getMessage());
@@ -104,11 +104,13 @@ $stmt = $pdo->prepare("
            EXISTS (SELECT 1 FROM applications a WHERE a.{$APP_USER_COL} = ? AND a.program_id = p.id) AS already_applied
     FROM programs p
     INNER JOIN users applicant ON applicant.id = ?
+    LEFT JOIN degree_programs degree
+        ON degree.campus_id = applicant.campus_id
+       AND degree.program_name = applicant.program
     LEFT JOIN countries country ON country.id = p.country_id
     WHERE p.status IN ('Active', 'Upcoming')
-      AND (p.end_date IS NULL OR p.end_date >= CURDATE())
-      AND p.eligible_account_type = applicant.account_type
-      AND (p.eligible_department = 'All Departments' OR p.eligible_department = applicant.department)
+      AND " . programApplicationWindowSql() . "
+      AND " . programEligibilitySql() . "
     ORDER BY p.start_date, p.program_name
 ");
 $stmt->execute([$userId, $userId]);

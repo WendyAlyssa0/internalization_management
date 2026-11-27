@@ -103,6 +103,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
             http_response_code(403);
             exit('You can only manage accounts from your campus.');
         }
+        $targetRole = strtolower(str_replace('_', ' ', (string)$target['user_role']));
+        if ($isCampusCoordinator && $targetRole !== 'applicant') {
+            http_response_code(403);
+            exit('Campus coordinators can only manage applicant accounts.');
+        }
+        if (!$isSuperAdmin && $targetRole === 'campus coordinator') {
+            http_response_code(403);
+            exit('Only a Super Admin can delete a campus coordinator.');
+        }
         if (!$isSuperAdmin && strtolower($target['user_role']) === 'super admin') {
             $_SESSION['error'] = 'Only a Super Admin can delete another Super Admin.';
             header("Location: dashboard.php?page=users");
@@ -161,6 +170,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_create'])) {
         'ovplia staff', 'approving official', 'bor secretary',
     ], true)) {
         $createErrors[] = 'Invalid role.';
+    }
+    if ($role === 'campus coordinator' && !$isSuperAdmin) {
+        $createErrors[] = 'Only a Super Admin can create a campus coordinator.';
     }
     if ($isCampusCoordinator && $role !== 'applicant') {
         $createErrors[] = 'Campus coordinators can create applicant accounts only.';
@@ -321,8 +333,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_edit'])) {
     $target = $targetStmt->fetch(PDO::FETCH_ASSOC);
     $targetRole = strtolower((string)($target['user_role'] ?? ''));
     if (!$target) $editErrors[] = 'User account not found.';
+    if (!$isSuperAdmin && $targetRole === 'campus coordinator') {
+        $editErrors[] = 'Only a Super Admin can edit a campus coordinator.';
+    }
     if ($isCampusCoordinator && $target && (int)$target['campus_id'] !== $currentCampusId) {
         $editErrors[] = 'You can only manage accounts from your campus.';
+    }
+    if ($isCampusCoordinator && $targetRole !== 'applicant') {
+        $editErrors[] = 'Campus coordinators can only manage applicant accounts.';
     }
     if (!$isSuperAdmin && $targetRole === 'super admin') {
         $editErrors[] = 'Only a Super Admin can edit another Super Admin.';
@@ -391,6 +409,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_edit'])) {
         http_response_code(403);
         exit('You can only manage accounts from your campus.');
     }
+    if ($editUser && $isCampusCoordinator && strtolower((string)$editUser['user_role']) !== 'applicant') {
+        http_response_code(403);
+        exit('Campus coordinators can only manage applicant accounts.');
+    }
+    if ($editUser && !$isSuperAdmin && strtolower((string)$editUser['user_role']) === 'campus coordinator') {
+        http_response_code(403);
+        exit('Only a Super Admin can edit a campus coordinator.');
+    }
 }
 
 $reopenCreateModal = ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_create']));
@@ -402,7 +428,9 @@ $reopenEditModal   = ($editUser !== null);
 $page       = max(1, (int) ($_GET['p'] ?? 1));
 $limit      = 10;
 $offset     = ($page - 1) * $limit;
-$scopeSql = $isCampusCoordinator ? ' WHERE campus_id = ' . $currentCampusId : '';
+$scopeSql = $isCampusCoordinator
+    ? " WHERE campus_id = $currentCampusId AND LOWER(REPLACE(user_role, '_', ' ')) = 'applicant'"
+    : '';
 $countUsersStmt = $pdo->query('SELECT COUNT(*) FROM users' . $scopeSql);
 $totalUsers = (int)$countUsersStmt->fetchColumn();
 $totalPages = max(1, (int)ceil($totalUsers / $limit));
@@ -412,7 +440,10 @@ $stmt = $pdo->prepare("
            u.campus_id, c.campus_name, u.status, u.created_at
     FROM users u
     LEFT JOIN campuses c ON c.id = u.campus_id
-    WHERE (:campus_id = 0 OR u.campus_id = :campus_id)
+    WHERE (:campus_id = 0 OR (
+        u.campus_id = :campus_id
+        AND LOWER(REPLACE(u.user_role, '_', ' ')) = 'applicant'
+    ))
     ORDER BY u.id DESC LIMIT :limit OFFSET :offset
 ");
 $stmt->bindValue(':campus_id', $isCampusCoordinator ? $currentCampusId : 0, PDO::PARAM_INT);
@@ -451,7 +482,7 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <option value="admin">Admin</option>
             <option value="super admin">Super Admin</option>
             <option value="applicant">Applicant</option>
-            <option value="campus coordinator">Non-Teaching Staff</option>
+            <option value="campus coordinator">Campus Coordinator</option>
         </select>
         <button class="create-btn" id="openModalBtn">
             <i class="fa fa-plus"></i> Add Account
@@ -582,7 +613,7 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <div class="modal-header">
             <div>
                 <h3 id="createModalTitle">Add Account</h3>
-                <p>Create a campus coordinator or an applicant account. Non-teaching is also an applicant type.</p>
+                <p>Super Admins can create campus coordinators; campus coordinators create student, faculty, and non-teaching applicant accounts for their campus.</p>
             </div>
             <button class="modal-close" id="closeCreateModalBtn" aria-label="Close modal">
                 <i class="fa fa-xmark"></i>
@@ -651,9 +682,13 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 'super admin' => 'Super Admin',
                                 'admin' => 'Admin',
                                 'applicant' => 'Applicant',
-                                'non-teaching' => 'Non-Teaching Staff',
+                                'campus coordinator' => 'Campus Coordinator',
+                                'ovplia staff' => 'OVPLIA Staff',
+                                'approving official' => 'Approving Official',
+                                'bor secretary' => 'BOR Secretary',
                             ];
                             if (!$isSuperAdmin) unset($roles['super admin']);
+                            if (!$isSuperAdmin) unset($roles['campus coordinator']);
                             if ($isCampusCoordinator) $roles = ['applicant' => 'Applicant'];
                             $selectedCRole = $_POST['role'] ?? '';
                             foreach ($roles as $val => $label):
@@ -816,6 +851,7 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 'bor secretary' => 'BOR Secretary',
                             ];
                             if (!$isSuperAdmin) unset($roles['super admin']);
+                            if (!$isSuperAdmin) unset($roles['campus coordinator']);
                             if ($isCampusCoordinator) $roles = ['applicant' => 'Applicant'];
                             $selectedRole = $_POST['edit_role'] ?? ($editUser['user_role'] ?? '');
                             foreach ($roles as $val => $label):
