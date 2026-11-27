@@ -1,395 +1,384 @@
 ﻿<?php
+
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/roles.php';
+require_once __DIR__ . '/role_helpers.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
-requireLogin(); // Ensure user is logged in
+
+/* =========================
+   ACCESS CONTROL
+   dashboard.php only calls requireLogin(), so guard here.
+========================= */
+if (!(canManageActivities() || isApprover() || isAdmin())) {
+    echo '<div class="alert alert-info" style="margin:16px 0;padding:12px 16px;border-radius:8px;background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;">You do not have access to this dashboard.</div>';
+    return;
+}
 
 $pdo = db();
 
-/* =========================
-   HELPERS
-========================= */
 if (!function_exists('h')) {
-    function h($v){
-        return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+    function h($value): string {
+        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
     }
 }
 
-function countRows(PDO $pdo, string $sql, array $params = []): int {
-    try {
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        return (int)$stmt->fetchColumn();
-    } catch (PDOException $e) {
-        error_log('countRows failed: ' . $e->getMessage());
-        return 0;
-    }
-}
+/* ===================================================
+   S34: FETCH DASHBOARD METRICS
+=================================================== */
 
-/* =========================
-   MONTHLY APPLICATIONS (Last 12 Months)
-========================= */
-$monthLabels = [];
-$monthCounts = [];
+// 1. Total Partners
+$totalPartners = (int)$pdo->query("SELECT COUNT(*) FROM partners")->fetchColumn();
 
-try {
-    $monthlyStmt = $pdo->query("
-        SELECT DATE_FORMAT(created_at, '%Y-%m') AS ym, COUNT(*) AS total
-        FROM applications
-        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
-        GROUP BY DATE_FORMAT(created_at, '%Y-%m')
-        ORDER BY ym
-    ");
-    
-    $byMonth = [];
-    foreach ($monthlyStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $byMonth[$row['ym']] = (int)$row['total'];
-    }
-
-    for ($i = 11; $i >= 0; $i--) {
-        $ym = date('Y-m', strtotime("-{$i} months"));
-        $monthLabels[] = date('M', strtotime($ym . '-01'));
-        $monthCounts[] = $byMonth[$ym] ?? 0;
-    }
-} catch (PDOException $e) {
-    error_log('monthly chart failed: ' . $e->getMessage());
-}
-
-/* =========================
-   HEADLINE COUNTS
-========================= */
-// Assuming your users table uses 'role' column (if it uses 'user_role', change it back)
-$totalApplicants = countRows($pdo, "SELECT COUNT(*) FROM users WHERE role = 'applicant' OR user_role = 'applicant'");
-
-$totalPrograms     = countRows($pdo, "SELECT COUNT(*) FROM programs");
-$activePrograms    = countRows($pdo, "SELECT COUNT(*) FROM programs WHERE status = 'Active'");
-$upcomingPrograms  = countRows($pdo, "SELECT COUNT(*) FROM programs WHERE status = 'Upcoming'");
-$completedPrograms = countRows($pdo, "SELECT COUNT(*) FROM programs WHERE status = 'Completed'");
-
-// Status buckets
-$pending  = countRows($pdo, "SELECT COUNT(*) FROM applications WHERE status IN ('submitted', 'under_review')");
-$approved = countRows($pdo, "SELECT COUNT(*) FROM applications WHERE status = 'approved'");
-$rejected = countRows($pdo, "SELECT COUNT(*) FROM applications WHERE status = 'rejected'");
-
-$totalUsers   = countRows($pdo, "SELECT COUNT(*) FROM users");
-$approvalRate = ($approved + $rejected) > 0
-    ? round(($approved / ($approved + $rejected)) * 100)
-    : 0;
-
-$totalApplications = countRows($pdo, "SELECT COUNT(*) FROM applications");
-$pendingPct  = $totalApplications > 0 ? round($pending  / $totalApplications * 100) : 0;
-$approvedPct = $totalApplications > 0 ? round($approved / $totalApplications * 100) : 0;
-$rejectedPct = $totalApplications > 0 ? round($rejected / $totalApplications * 100) : 0;
-$totalPartners = countRows($pdo, "SELECT COUNT(*) FROM partners");
-$outboundStudentCount = countRows($pdo, "
-    SELECT COUNT(*) FROM applications a
-    LEFT JOIN users u ON u.id = a.applicant_id
-    WHERE LOWER(a.mobility_type) LIKE 'outbound%'
-      AND LOWER(COALESCE(NULLIF(u.account_type, ''), u.user_role, '')) IN ('student', 'applicant')
-");
-$outboundFacultyCount = countRows($pdo, "
-    SELECT COUNT(*) FROM applications a
-    LEFT JOIN users u ON u.id = a.applicant_id
-    WHERE LOWER(a.mobility_type) LIKE 'outbound%'
-      AND LOWER(COALESCE(NULLIF(u.account_type, ''), u.user_role, '')) = 'faculty'
-");
-$inboundTypeCounts = ['student' => 0, 'faculty' => 0];
-$inboundCountsStmt = $pdo->query("
-    SELECT participant_type, COUNT(*) AS total
-    FROM inbound_participants
-    GROUP BY participant_type
-");
-foreach ($inboundCountsStmt->fetchAll(PDO::FETCH_ASSOC) as $inboundRow) {
-    $type = strtolower((string)$inboundRow['participant_type']);
-    if (isset($inboundTypeCounts[$type])) {
-        $inboundTypeCounts[$type] = (int)$inboundRow['total'];
-    }
-}
-$programTypeBreakdown = $pdo->query("
-    SELECT COALESCE(NULLIF(program_type, ''), 'Uncategorized') AS program_type, COUNT(*) AS total
+// 2. Total Programs + Breakdown by Type
+$programTypes = $pdo->query("
+    SELECT COALESCE(NULLIF(program_type, ''), 'Uncategorized') AS type_name, COUNT(*) AS cnt
     FROM programs
-    GROUP BY COALESCE(NULLIF(program_type, ''), 'Uncategorized')
-    ORDER BY program_type
+    GROUP BY type_name
+    ORDER BY cnt DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+$totalPrograms = (int)array_sum(array_column($programTypes, 'cnt'));
+
+// 3. Mobility counts (approved applications only)
+if (!function_exists('getMobilityCount')) {
+    function getMobilityCount(PDO $pdo, string $accountType, string $direction): int {
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*)
+            FROM applications a
+            INNER JOIN users u ON a.applicant_id = u.id
+            WHERE LOWER(a.status) = 'approved'
+              AND LOWER(u.account_type) = ?
+              AND LOWER(a.mobility_type) = ?
+        ");
+        $stmt->execute([strtolower($accountType), strtolower($direction)]);
+        return (int)$stmt->fetchColumn();
+    }
+}
+
+$outboundStudents = getMobilityCount($pdo, 'student', 'outbound');
+$inboundStudents  = getMobilityCount($pdo, 'student', 'inbound');
+$outboundFaculty  = getMobilityCount($pdo, 'faculty', 'outbound');
+$inboundFaculty   = getMobilityCount($pdo, 'faculty', 'inbound');
+
+// 4. Mobility Status
+$mobilityStatuses = $pdo->query("
+    SELECT status, COUNT(*) AS cnt
+    FROM applications
+    GROUP BY status
+    ORDER BY cnt DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-/* =========================
-   RECENT APPLICATIONS
-========================= */
-$recentApplications = [];
-try {
-    $recentStmt = $pdo->query("
-        SELECT a.*, u.first_name, u.last_name, u.email
-        FROM applications a
-        LEFT JOIN users u ON u.id = a.applicant_id
-        ORDER BY a.created_at DESC
-        LIMIT 5
-    ");
-    $recentApplications = $recentStmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {}
+// 5. Recent Applications
+$recentApplications = $pdo->query("
+    SELECT a.id, a.created_at, a.status, a.mobility_type,
+           CONCAT(u.first_name, ' ', u.last_name) AS applicant_name,
+           p.program_name
+    FROM applications a
+    LEFT JOIN users u ON a.applicant_id = u.id
+    LEFT JOIN programs p ON a.program_id = p.id
+    ORDER BY a.created_at DESC
+    LIMIT 5
+")->fetchAll(PDO::FETCH_ASSOC);
 
-$firstName = $_SESSION['first_name'] ?? 'Administrator';
+$canDownloadReports = (canManageActivities() || isAdmin());
 ?>
 
-<!-- The UI remains completely unchanged -->
-<div class="db-wrap">
+<style>
+    /* S34 Dashboard Cards Layout */
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+    .stat-card {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        position: relative;
+        overflow: hidden;
+    }
+    .stat-icon {
+        width: 48px; height: 48px;
+        border-radius: 12px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 24px; flex-shrink: 0;
+    }
+    .stat-icon--blue   { background: #e0f2fe; color: #0284c7; }
+    .stat-icon--green  { background: #dcfce7; color: #16a34a; }
+    .stat-icon--purple { background: #f3e8ff; color: #7e22ce; }
+    .stat-icon--orange { background: #ffedd5; color: #ea580c; }
+    .stat-icon--cyan   { background: #cffafe; color: #0891b2; }
+    .stat-icon--pink   { background: #fce7f3; color: #db2777; }
 
-    <!-- ============= PAGE HEAD ============= -->
-    <div class="page-head">
-        <div>
-            <div class="page-eyebrow">Overview</div>
-            <h1 class="page-title">Welcome back, <?= h($firstName) ?></h1>
-            <p class="page-sub">A snapshot of applications, programs, and activity across the system.</p>
-        </div>
-        <a href="?page=applications" class="btn btn-primary">
-            <i class="fa-solid fa-plus"></i> Review Applications
-        </a>
-    </div>
+    .stat-info h4 { margin: 0 0 4px; font-size: 0.85rem; color: #64748b; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-info h2 { margin: 0; font-size: 1.8rem; font-weight: 700; color: #0f172a; }
+    .stat-info a { font-size: 0.8rem; color: #2563eb; text-decoration: none; display: inline-block; margin-top: 8px; font-weight: 600; cursor: pointer; }
+    .stat-info a:hover { text-decoration: underline; }
 
-    <!-- ============= SYSTEM OVERVIEW ============= -->
-    <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
-        <div class="stat-card">
-            <div class="stat-label"><i class="fa-solid fa-building"></i> Partners</div>
-            <div class="stat-value"><?= number_format($totalPartners) ?></div>
-            <div class="stat-delta"><span>Partner institutions</span></div>
-        </div>
-        <button type="button" class="stat-card" id="programBreakdownButton" aria-haspopup="dialog">
-            <span class="stat-label"><i class="fa-solid fa-graduation-cap"></i> Programs</span>
-            <span class="stat-value"><?= number_format($totalPrograms) ?></span>
-            <span class="stat-delta"><span><?= number_format($activePrograms) ?> active · view by type</span></span>
-        </button>
-        <div class="stat-card">
-            <div class="stat-label"><i class="fa-solid fa-plane-departure"></i> Outbound Students</div>
-            <div class="stat-value"><?= number_format($outboundStudentCount) ?></div>
-            <div class="stat-delta"><span>Applications</span></div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label"><i class="fa-solid fa-plane-arrival"></i> Inbound Students</div>
-            <div class="stat-value"><?= number_format($inboundTypeCounts['student']) ?></div>
-            <div class="stat-delta"><span>Admin-entered participants</span></div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label"><i class="fa-solid fa-user-tie"></i> Outbound Faculty</div>
-            <div class="stat-value"><?= number_format($outboundFacultyCount) ?></div>
-            <div class="stat-delta"><span>Applications</span></div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label"><i class="fa-solid fa-user-group"></i> Inbound Faculty</div>
-            <div class="stat-value"><?= number_format($inboundTypeCounts['faculty']) ?></div>
-            <div class="stat-delta"><span>Admin-entered participants</span></div>
-        </div>
-    </div>
+    /* S34 Bottom Grid */
+    .dashboard-bottom {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+    @media (max-width: 900px) { .dashboard-bottom { grid-template-columns: 1fr; } }
 
-    <!-- ============= MOBILITY STATUS ============= -->
-    <div class="overview-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));">
-        
-        <!-- Line Chart -->
-        <div class="panel linechart-panel">
-            <div class="panel-header">
-                <span class="panel-title">Applications Per Month</span>
-                <a href="?page=applications" class="view-all-link">View all</a>
-            </div>
-            <div class="panel-body" style="height: 280px;">
-                <canvas id="lineChart"></canvas>
-            </div>
-        </div>
+    .panel-card {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    }
+    .panel-card h3 {
+        margin: 0 0 16px;
+        font-size: 1rem;
+        font-weight: 600;
+        color: #0f172a;
+        padding-bottom: 12px;
+        border-bottom: 1px solid #e2e8f0;
+    }
 
-        <!-- Donut Chart -->
-        <div class="panel donutchart-panel">
-            <div class="panel-header">
-                <span class="panel-title">Mobility Status</span>
-                <a href="?page=applications" class="view-all-link">View all</a>
-            </div>
-            <div class="panel-body">
-                <div class="donut-wrap">
-                    <div class="donut-canvas-wrap">
-                        <canvas id="doughnutChart"></canvas>
-                        <div class="donut-center">
-                            <span class="donut-total"><?= number_format($totalApplications) ?></span>
-                            <span class="donut-total-label">Total</span>
-                        </div>
-                    </div>
-                    <ul class="donut-legend">
-                        <li>
-                            <span class="legend-dot success"></span>
-                            <span class="legend-name">Approved</span>
-                            <span class="legend-count"><?= number_format($approved) ?></span>
-                            <span class="legend-pct">(<?= $approvedPct ?>%)</span>
-                        </li>
-                        <li>
-                            <span class="legend-dot warning"></span>
-                            <span class="legend-name">Pending</span>
-                            <span class="legend-count"><?= number_format($pending) ?></span>
-                            <span class="legend-pct">(<?= $pendingPct ?>%)</span>
-                        </li>
-                        <li>
-                            <span class="legend-dot danger"></span>
-                            <span class="legend-name">Rejected</span>
-                            <span class="legend-count"><?= number_format($rejected) ?></span>
-                            <span class="legend-pct">(<?= $rejectedPct ?>%)</span>
-                        </li>
-                    </ul>
-                </div>
-            </div>
-        </div>
+    .status-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f1f5f9; font-size: 0.875rem; }
+    .status-row:last-child { border-bottom: none; }
+    .status-label { color: #475569; font-weight: 500; text-transform: capitalize; }
+    .status-count { font-weight: 700; color: #0f172a; background: #f1f5f9; padding: 2px 10px; border-radius: 20px; font-size: 0.8rem; }
 
-    </div>
+    .recent-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    .recent-table th { text-align: left; padding: 10px 0; color: #64748b; font-weight: 600; border-bottom: 1px solid #e2e8f0; font-size: 0.8rem; text-transform: uppercase; }
+    .recent-table td { padding: 12px 0; border-bottom: 1px solid #f1f5f9; color: #334155; }
 
-    <!-- ============= SYSTEM OVERVIEW + RECENT APPLICATIONS ============= -->
-    <div class="bottom-grid">
-        <div class="panel">
-            <div class="panel-header">
-                <span class="panel-title">System Overview</span>
-            </div>
-            <div class="panel-body">
-                <div class="system-overview-grid">
-                    <div class="so-item">
-                        <span class="so-icon material-symbols-outlined" style="background:var(--bg);color:var(--text-soft);display:flex;align-items:center;justify-content:center;border-radius:var(--radius-sm);">group</span>
-                        <div class="so-text">
-                            <span class="so-label">Total Users</span>
-                            <span class="so-value"><?= number_format($totalUsers) ?></span>
-                        </div>
-                    </div>
-                    <div class="so-item">
-                        <span class="so-icon material-symbols-outlined" style="background:var(--bg);color:var(--text-soft);display:flex;align-items:center;justify-content:center;border-radius:var(--radius-sm);">school</span>
-                        <div class="so-text">
-                            <span class="so-label">Total Programs</span>
-                            <span class="so-value"><?= number_format($totalPrograms) ?></span>
-                        </div>
-                    </div>
-                    <div class="so-item">
-                        <span class="so-icon material-symbols-outlined" style="background:var(--bg);color:var(--success);display:flex;align-items:center;justify-content:center;border-radius:var(--radius-sm);">verified</span>
-                        <div class="so-text">
-                            <span class="so-label">Approved</span>
-                            <span class="so-value so-good"><?= number_format($approved) ?></span>
-                        </div>
-                    </div>
-                    <div class="so-item">
-                        <span class="so-icon material-symbols-outlined" style="background:var(--bg);color:var(--danger);display:flex;align-items:center;justify-content:center;border-radius:var(--radius-sm);">cancel</span>
-                        <div class="so-text">
-                            <span class="so-label">Rejected</span>
-                            <span class="so-value"><?= number_format($rejected) ?></span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+    .badge-status { font-size: 0.75rem; padding: 2px 8px; border-radius: 12px; font-weight: 600; text-transform: capitalize; background: #f1f5f9; color: #475569; }
+    .badge-status--approved  { background: #dcfce7; color: #15803d; }
+    .badge-status--pending   { background: #fef9c3; color: #a16207; }
+    .badge-status--rejected  { background: #fee2e2; color: #b91c1c; }
+    .badge-status--submitted { background: #e0f2fe; color: #0369a1; }
 
-        <div class="panel">
-            <div class="panel-header">
-                <span class="panel-title">Recent Applications</span>
-                <a href="?page=applications" class="view-all-link">View all</a>
-            </div>
-            <div class="table-wrap">
-                <table class="data-table">
-                    <thead><tr><th>Applicant</th><th>Status</th><th>Submitted</th></tr></thead>
-                    <tbody>
-                    <?php if (!empty($recentApplications)): ?>
-                        <?php foreach ($recentApplications as $a): ?>
-                            <?php
-                                $status = strtolower((string)($a['status'] ?? 'submitted'));
-                                $badgeClass = $status === 'approved' ? 'success' : ($status === 'rejected' ? 'danger' : ($status === 'under_review' ? 'info' : 'warning'));
-                            ?>
-                            <tr>
-                                <td>
-                                    <div class="applicant-cell">
-                                        <span class="applicant-name"><?= h(trim(($a['first_name'] ?? '') . ' ' . ($a['last_name'] ?? '')) ?: 'Unknown') ?></span>
-                                        <span class="applicant-email"><?= h($a['email'] ?? '') ?></span>
-                                    </div>
-                                </td>
-                                <td><span class="badge <?= $badgeClass ?>"><?= h(ucwords(str_replace('_', ' ', $status))) ?></span></td>
-                                <td><?= h(date('M j, Y', strtotime($a['created_at']))) ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php else: ?>
-                        <tr><td colspan="3" class="text-center" style="padding:20px;">No applications yet.</td></tr>
-                    <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
+    /* S35 Accreditation Reports Grid */
+    .accreditation-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 20px;
+        margin-top: 16px;
+    }
+    .accreditation-card {
+        border: 1px dashed #cbd5e1;
+        border-radius: 10px;
+        padding: 24px;
+        text-align: center;
+        background: #f8fafc;
+        transition: all 0.2s;
+    }
+    .accreditation-card:hover { border-color: #2563eb; background: #eff6ff; }
+    .accreditation-card i { font-size: 2rem; color: #94a3b8; margin-bottom: 12px; }
+    .accreditation-card h4 { margin: 0 0 8px; font-size: 1rem; color: #0f172a; }
+    .accreditation-card p { margin: 0 0 16px; font-size: 0.8rem; color: #64748b; }
+    .accreditation-card .btn-download {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 8px 16px; border-radius: 6px; font-size: 0.8rem;
+        font-weight: 600; color: #fff; background: #2563eb; text-decoration: none;
+    }
+    .accreditation-card .btn-download:hover { background: #1d4ed8; }
 
+    /* Modal Styles */
+    .modal-backdrop {
+        display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(15, 23, 42, 0.5); backdrop-filter: blur(4px);
+        z-index: 9999; align-items: center; justify-content: center; padding: 20px;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal-box {
+        background: #fff; border-radius: 12px; width: 100%; max-width: 440px;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); padding: 24px;
+    }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 16px; }
+    .modal-header h3 { margin: 0; font-size: 1.1rem; color: #0f172a; }
+    .modal-close { background: none; border: none; font-size: 1.2rem; color: #64748b; cursor: pointer; }
+</style>
+
+<div class="page-header">
+    <h2>Dashboard Overview</h2>
+    <p>Welcome back, <?= h($_SESSION['first_name'] ?? 'Administrator') ?>. Here is your mobility snapshot.</p>
 </div>
 
-<div id="programTypeModal" role="dialog" aria-modal="true" aria-labelledby="programTypeTitle" hidden style="position:fixed;inset:0;z-index:2000;background:rgba(15,23,42,.45);align-items:center;justify-content:center;padding:20px;">
-    <div style="background:#fff;border-radius:12px;padding:24px;width:min(100%,480px);max-height:80vh;overflow:auto;">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-            <h2 id="programTypeTitle">Programs by Type</h2>
-            <button type="button" id="closeProgramTypeModal" aria-label="Close">Close</button>
+<!-- S34: Top Stat Cards -->
+<div class="dashboard-grid">
+    <div class="stat-card accent-blue">
+        <div class="stat-icon stat-icon--blue"><i class="fa-solid fa-handshake"></i></div>
+        <div class="stat-info">
+            <h4>Total Partners</h4>
+            <h2><?= number_format($totalPartners) ?></h2>
+            <a href="?page=partners">View all partners <i class="fa fa-arrow-right"></i></a>
         </div>
-        <ul>
-            <?php foreach ($programTypeBreakdown as $breakdown): ?>
-                <li><?= h($breakdown['program_type']) ?> — <?= number_format((int)$breakdown['total']) ?></li>
+    </div>
+
+    <div class="stat-card accent-green">
+        <div class="stat-icon stat-icon--green"><i class="fa-solid fa-graduation-cap"></i></div>
+        <div class="stat-info">
+            <h4>Total Programs</h4>
+            <h2><?= number_format($totalPrograms) ?></h2>
+            <a href="javascript:void(0)" onclick="openProgramModal()"><i class="fa fa-chart-pie"></i> Breakdown by type</a>
+        </div>
+    </div>
+
+    <div class="stat-card accent-purple">
+        <div class="stat-icon stat-icon--purple"><i class="fa-solid fa-plane-departure"></i></div>
+        <div class="stat-info">
+            <h4>Outbound Students</h4>
+            <h2><?= number_format($outboundStudents) ?></h2>
+        </div>
+    </div>
+
+    <div class="stat-card accent-teal">
+        <div class="stat-icon stat-icon--cyan"><i class="fa-solid fa-plane-arrival"></i></div>
+        <div class="stat-info">
+            <h4>Inbound Students</h4>
+            <h2><?= number_format($inboundStudents) ?></h2>
+        </div>
+    </div>
+
+    <div class="stat-card accent-orange">
+        <div class="stat-icon stat-icon--orange"><i class="fa-solid fa-chalkboard-user"></i></div>
+        <div class="stat-info">
+            <h4>Outbound Faculty</h4>
+            <h2><?= number_format($outboundFaculty) ?></h2>
+        </div>
+    </div>
+
+    <div class="stat-card" style="--accent:#db2777;">
+        <div class="stat-icon stat-icon--pink"><i class="fa-solid fa-user-tie"></i></div>
+        <div class="stat-info">
+            <h4>Inbound Faculty</h4>
+            <h2><?= number_format($inboundFaculty) ?></h2>
+        </div>
+    </div>
+</div>
+
+<!-- U13: Recent applications directly under the overview cards -->
+<div class="panel-card" style="margin-bottom:20px;">
+    <h3>Recent Applications</h3>
+    <?php if (empty($recentApplications)): ?>
+        <p style="color:#94a3b8; font-size:0.875rem;">No recent applications found.</p>
+    <?php else: ?>
+        <table class="recent-table">
+            <thead>
+                <tr>
+                    <th>Applicant</th>
+                    <th>Program</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($recentApplications as $app): ?>
+                    <?php $statusClass = 'badge-status--' . strtolower(str_replace(' ', '_', (string)$app['status'])); ?>
+                    <tr>
+                        <td><strong><?= h($app['applicant_name'] ?? 'Unknown') ?></strong></td>
+                        <td><?= h($app['program_name'] ?? 'N/A') ?></td>
+                        <td><span class="badge-status <?= h($statusClass) ?>"><?= h(str_replace('_', ' ', (string)$app['status'])) ?></span></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        <div style="text-align:right; margin-top:12px;">
+            <a href="?page=applications" style="font-size:0.8rem; color:#2563eb; text-decoration:none; font-weight:600;">View all applications <i class="fa fa-arrow-right"></i></a>
+        </div>
+    <?php endif; ?>
+</div>
+
+<!-- Mobility status -->
+<div class="dashboard-bottom">
+    <div class="panel-card">
+        <h3>Mobility Status</h3>
+        <?php if (empty($mobilityStatuses)): ?>
+            <p style="color:#94a3b8; font-size:0.875rem;">No application data available yet.</p>
+        <?php else: ?>
+            <?php foreach ($mobilityStatuses as $ms): ?>
+                <div class="status-row">
+                    <span class="status-label"><?= h(str_replace('_', ' ', (string)$ms['status'])) ?></span>
+                    <span class="status-count"><?= h($ms['cnt']) ?></span>
+                </div>
             <?php endforeach; ?>
-            <?php if (!$programTypeBreakdown): ?><li>No programs recorded.</li><?php endif; ?>
-        </ul>
+        <?php endif; ?>
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- S35: Accreditation Reports -->
+<div class="panel-card" style="margin-top: 20px;">
+    <h3>Accreditation &amp; Documentation Reports</h3>
+    <p style="margin:0 0 16px; font-size:0.875rem; color:#64748b;">Download required documentation for institutional accreditation, evaluation, and reporting.</p>
+
+    <?php if (!$canDownloadReports): ?>
+        <p style="color:#94a3b8; font-size:0.875rem;">Report downloads are available to coordinators and administrators.</p>
+    <?php else: ?>
+    <div class="accreditation-grid">
+        <div class="accreditation-card">
+            <i class="fa-solid fa-file-invoice"></i>
+            <h4>Evaluation Reports</h4>
+            <p>Annual performance and mobility evaluations.</p>
+            <a href="report_download.php?type=evaluation" class="btn-download"><i class="fa fa-download"></i> Download PDF</a>
+        </div>
+
+        <div class="accreditation-card">
+            <i class="fa-solid fa-book-open"></i>
+            <h4>Narrative Reports</h4>
+            <p>Descriptive summaries of internationalization efforts.</p>
+            <a href="report_download.php?type=narrative" class="btn-download"><i class="fa fa-download"></i> Download PDF</a>
+        </div>
+
+        <div class="accreditation-card">
+            <i class="fa-solid fa-images"></i>
+            <h4>Pictures / Documentation</h4>
+            <p>Visual evidence of programs and events.</p>
+            <a href="report_download.php?type=pictures" class="btn-download"><i class="fa fa-download"></i> Download PDF</a>
+        </div>
+    </div>
+    <?php endif; ?>
+</div>
+
+<!-- PROGRAM BREAKDOWN MODAL (S34) -->
+<div id="programModal" class="modal-backdrop" onclick="closeProgramModalOutside(event)">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3>Program Breakdown by Type</h3>
+            <button class="modal-close" onclick="closeProgramModal()" aria-label="Close"><i class="fa fa-times"></i></button>
+        </div>
+        <div>
+            <?php if (empty($programTypes)): ?>
+                <p style="color:#94a3b8; font-size:0.875rem;">No program data available.</p>
+            <?php else: ?>
+                <?php foreach ($programTypes as $pt): ?>
+                    <div class="status-row">
+                        <span class="status-label"><?= h($pt['type_name']) ?></span>
+                        <span class="status-count"><?= h($pt['cnt']) ?></span>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+        <div style="text-align:right; margin-top:20px;">
+            <button class="btn-cancel" onclick="closeProgramModal()" style="padding:8px 16px; border-radius:6px; border:1px solid #cbd5e1; background:#fff; cursor:pointer;">Close</button>
+        </div>
+    </div>
+</div>
+
 <script>
-    const programTypeModal = document.getElementById('programTypeModal');
-    document.getElementById('programBreakdownButton').addEventListener('click', () => {
-        programTypeModal.hidden = false;
-        programTypeModal.style.display = 'flex';
-    });
-    document.getElementById('closeProgramTypeModal').addEventListener('click', () => {
-        programTypeModal.hidden = true;
-        programTypeModal.style.display = 'none';
-    });
-    programTypeModal.addEventListener('click', event => {
-        if (event.target === programTypeModal) {
-            programTypeModal.hidden = true;
-            programTypeModal.style.display = 'none';
-        }
-    });
-    Chart.defaults.font.family = "'Oswald', sans-serif";
-    Chart.defaults.color = '#64748b';
-
-    new Chart(document.getElementById('lineChart'), {
-        type: 'line',
-        data: {
-            labels: <?= json_encode($monthLabels) ?>,
-            datasets: [{
-                label: 'Applications',
-                data: <?= json_encode($monthCounts) ?>,
-                borderColor: '#005fd5',
-                backgroundColor: 'rgba(0, 95, 213, 0.08)',
-                fill: true,
-                tension: 0.4,
-                pointRadius: 3
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-                x: { grid: { display: false } },
-                y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: 'rgba(0,0,0,0.04)' } }
-            }
-        }
-    });
-
-    new Chart(document.getElementById('doughnutChart'), {
-        type: 'doughnut',
-        data: {
-            labels: ['Approved', 'Pending', 'Rejected'],
-            datasets: [{
-                data: [<?= (int)$approved ?>, <?= (int)$pending ?>, <?= (int)$rejected ?>],
-                backgroundColor: ['#1a9c6b', '#c47a00', '#c40000'],
-                borderWidth: 0,
-                hoverOffset: 4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            cutout: '70%',
-            plugins: { legend: { display: false } }
-        }
+    function openProgramModal() {
+        document.getElementById('programModal').classList.add('open');
+    }
+    function closeProgramModal() {
+        document.getElementById('programModal').classList.remove('open');
+    }
+    function closeProgramModalOutside(e) {
+        if (e.target.id === 'programModal') closeProgramModal();
+    }
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeProgramModal();
     });
 </script>

@@ -134,26 +134,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
     $program_id        = (int)($_POST['program_id'] ?? 0);
     $requirement_id    = (int)($_POST['requirement_id'] ?? 0);
-    $applicantType     = strtolower(trim((string)($_POST['applicant_type'] ?? '')));
+    $applicantTypes    = $_POST['applicant_types'] ?? []; 
     $is_required       = isset($_POST['is_required']) ? 1 : 0;
 
-    if (!$program_id || !$requirement_id || !in_array($applicantType, ['student', 'faculty', 'non-teaching'], true)) {
-        echo json_encode(['ok' => false, 'message' => 'Program, requirement, and a valid applicant type are required.']);
+    if (!$program_id || !$requirement_id || empty($applicantTypes) || !is_array($applicantTypes)) {
+        echo json_encode(['ok' => false, 'message' => 'Program, requirement, and at least one applicant type are required.']);
         exit();
     }
 
+    $validTypes = ['student', 'faculty', 'non-teaching'];
+    $insertedCount = 0;
+    $skippedCount = 0;
+
     try {
         $check = $pdo->prepare("SELECT id FROM program_requirements WHERE program_id = ? AND requirement_id = ? AND applicant_type = ?");
-        $check->execute([$program_id, $requirement_id, $applicantType]);
-        if ($check->fetch()) {
-            echo json_encode(['ok' => false, 'message' => 'This requirement is already assigned to this program.']);
-            exit();
+        $insert = $pdo->prepare("INSERT INTO program_requirements (program_id, requirement_id, applicant_type, is_required) VALUES (?, ?, ?, ?)");
+
+        foreach ($applicantTypes as $type) {
+            $type = strtolower(trim((string)$type));
+            if (!in_array($type, $validTypes, true)) continue;
+
+            $check->execute([$program_id, $requirement_id, $type]);
+            if ($check->fetch()) {
+                $skippedCount++;
+            } else {
+                $insert->execute([$program_id, $requirement_id, $type, $is_required]);
+                $insertedCount++;
+            }
         }
 
-        $stmt = $pdo->prepare("INSERT INTO program_requirements (program_id, requirement_id, applicant_type, is_required) VALUES (?, ?, ?, ?)");
-        $stmt->execute([$program_id, $requirement_id, $applicantType, $is_required]);
-
-        echo json_encode(['ok' => true, 'message' => 'Requirement assigned successfully.']);
+        if ($insertedCount === 0) {
+            echo json_encode(['ok' => false, 'message' => 'This requirement is already assigned to the selected program(s) for the chosen applicant type(s).']);
+        } else {
+            $msg = "Requirement assigned to $insertedCount applicant type(s).";
+            if ($skippedCount > 0) $msg .= " ($skippedCount skipped as they were already assigned).";
+            echo json_encode(['ok' => true, 'message' => $msg]);
+        }
     } catch (PDOException $e) {
         error_log($e->getMessage());
         echo json_encode(['ok' => false, 'message' => 'Database error. Please try again.']);
@@ -215,6 +231,31 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     .upload-hint {
         display: block; font-size: 0.7rem; color: #94a3b8; margin-top: 4px;
+    }
+
+    /* FIXED CHECKLIST STYLES */
+    .checkbox-grid {
+        display: flex; flex-direction: row; flex-wrap: wrap; gap: 16px;
+        padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc;
+    }
+    .checkbox-label {
+        display: flex; align-items: center; gap: 8px;
+        font-size: 0.875rem; color: #334155; cursor: pointer; font-weight: 500;
+        margin: 0;
+    }
+    /* Force native checkbox appearance so it doesn't disappear */
+    .checkbox-label input[type="checkbox"] {
+        -webkit-appearance: checkbox !important;
+        -moz-appearance: checkbox !important;
+        appearance: checkbox !important;
+        width: 16px !important; 
+        height: 16px !important; 
+        cursor: pointer; 
+        margin: 0;
+        accent-color: #2563eb;
+        background: transparent !important;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 4px;
     }
 
     .toast {
@@ -370,7 +411,7 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <h3>Assign Program Requirement</h3>
                 <p>Select a program and a requirement from the master list.</p>
             </div>
-            <button class="modal-close" onclick="closeModal()" aria-label="Close"><i class="fa fa-xmark"></i></button>
+            <button class="modal-close" onclick="closeModal()" aria-label="Close"><i class="fa fa-times"></i></button>
         </div>
 
         <div class="modal-body">
@@ -403,19 +444,28 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         </p>
                     </div>
 
-                    <div class="form-group col-6">
-                        <label>Applicant Type <span class="required">*</span></label>
-                        <select name="applicant_type" required>
-                            <option value="student">Student</option>
-                            <option value="faculty">Faculty</option>
-                            <option value="non-teaching">Non-teaching</option>
-                        </select>
+                    <div class="form-group col-12">
+                        <label>Applicant Types <span class="required">*</span></label>
+                        <div class="checkbox-grid">
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="applicant_types[]" value="student" checked>
+                                Student
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="applicant_types[]" value="faculty">
+                                Faculty
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="applicant_types[]" value="non-teaching">
+                                Non-teaching
+                            </label>
+                        </div>
                     </div>
 
-                    <div class="form-group col-6">
+                    <div class="form-group col-12">
                         <label>Mandatory?</label>
                         <label style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;background:#fff;">
-                            <input type="checkbox" name="is_required" checked style="width:16px;height:16px;">
+                            <input type="checkbox" name="is_required" checked style="appearance: auto; width:16px;height:16px;">
                             <span style="font-size:0.875rem;color:#475569;">Yes, this requirement is mandatory</span>
                         </label>
                     </div>
@@ -474,9 +524,17 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
         if (e.key === 'Escape' && modal.classList.contains('open')) closeModal();
     });
 
-    /* ---------- Add Requirement (unchanged backend) ---------- */
+    /* ---------- Add Requirement ---------- */
     form.addEventListener('submit', function (e) {
         e.preventDefault();
+
+        /* Client-side validation for at least one checkbox */
+        var checkedTypes = form.querySelectorAll('input[name="applicant_types[]"]:checked');
+        if (checkedTypes.length === 0) {
+            showToast('error', 'Please select at least one Applicant Type.');
+            return;
+        }
+
         var btn = form.querySelector('[type="submit"]');
         var original = btn.innerHTML;
         btn.disabled = true;
@@ -505,7 +563,7 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
             });
     });
 
-    /* ---------- Template Upload (unchanged backend) ---------- */
+    /* ---------- Template Upload ---------- */
     document.querySelectorAll('.requirement-file-form').forEach(function (form) {
         form.addEventListener('submit', function (e) {
             e.preventDefault();

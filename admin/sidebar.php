@@ -28,10 +28,12 @@ function openMenu(array $items, string $page): string {
 
 /* =========================================
    DEFINE MENUS WITH PERMISSION CHECKS
+   Group order = order shown in the sidebar:
+   Program & Location > Applications > Mobility > Communication > Administration
 ========================================= */
 $menus = [];
 
-// 1. Program Management
+// 1. Program & Location
 if (canManagePrograms()) {
     $menus['program_management'] = [
         'label' => 'Program Management', 'icon' => 'fa-solid fa-graduation-cap', 'group' => 'Program & Location',
@@ -51,8 +53,6 @@ if (canManageSystem()) {
         ],
     ];
 }
-
-// 2. Location Management
 if (canManagePartners()) {
     $menus['location_management'] = [
         'label' => 'Location Management', 'icon' => 'fa-solid fa-location-dot', 'group' => 'Program & Location',
@@ -62,26 +62,26 @@ if (canManagePartners()) {
     ];
 }
 
-// 3. Application Management
+// 2. Applications
 if (canManageActivities() || isApprover() || isAdmin()) {
     $menus['application_management'] = [
         'label' => 'Application Management', 'icon' => 'fa-solid fa-file-pen', 'group' => 'Applications',
         'items' => [
-            'applications'        => ['icon' => 'fa-solid fa-file-lines', 'label' => 'Applications'],
-            'documents'           => ['icon' => 'fa-solid fa-folder-open', 'label' => 'Submitted Documents'],
-            'requirements'        => ['icon' => 'fa-solid fa-list-check', 'label' => 'Master Requirements'],
-            'program_requirements'=> ['icon' => 'fa-solid fa-link', 'label' => 'Program Requirements'],
+            'applications'         => ['icon' => 'fa-solid fa-file-lines', 'label' => 'Applications'],
+            'documents'            => ['icon' => 'fa-solid fa-folder-open', 'label' => 'Submitted Documents'],
+            'requirements'         => ['icon' => 'fa-solid fa-list-check', 'label' => 'Master Requirements'],
+            'program_requirements' => ['icon' => 'fa-solid fa-link', 'label' => 'Program Requirements'],
         ],
     ];
 }
 
-// 4. Student Mobility
+// 3. Mobility
 if (canManageActivities() || isAdmin()) {
     $menus['student_mobility'] = [
         'label' => 'Student Mobility', 'icon' => 'fa-solid fa-plane-departure', 'group' => 'Mobility',
         'items' => [
-            'inbound_students'  => ['icon' => 'fa-solid fa-user-graduate', 'label' => 'Inbound Students'],
-            'outbound_students' => ['icon' => 'fa-solid fa-user-tie', 'label' => 'Outbound Students'],
+            'inbound_students'   => ['icon' => 'fa-solid fa-user-graduate', 'label' => 'Inbound Students'],
+            'outbound_students'  => ['icon' => 'fa-solid fa-user-tie', 'label' => 'Outbound Students'],
             'student_management' => ['icon' => 'fa-solid fa-users', 'label' => 'Student Directory'],
             'approved_students'  => ['icon' => 'fa-solid fa-user-check', 'label' => 'Approved Students'],
             'travel_information' => ['icon' => 'fa-solid fa-passport', 'label' => 'Travel Information'],
@@ -90,7 +90,7 @@ if (canManageActivities() || isAdmin()) {
     ];
 }
 
-// 5. Communication
+// 4. Communication
 $menus['communication'] = [
     'label' => 'Communication', 'icon' => 'fa-solid fa-comments', 'group' => 'Communication',
     'items' => [
@@ -99,7 +99,7 @@ $menus['communication'] = [
     ],
 ];
 
-// 6. Administration (Strict Admin/Super Admin Only)
+// 5. Administration
 if (canManageSystem() || adminCurrentRole() === 'campus coordinator') {
     $menus['users'] = [
         'label' => 'Users', 'icon' => 'fa-solid fa-user-gear', 'group' => 'Administration',
@@ -146,30 +146,36 @@ if (canManageSystem()) {
         </li>
 
         <?php
-        $lastGroup = null;
-        foreach ($menus as $menu):
-            if ($menu['group'] !== $lastGroup):
-                $lastGroup = $menu['group'];
-        ?>
-            <li class="sidebar-group-label"><?= e(strtoupper($lastGroup)) ?></li>
-        <?php endif; ?>
+        /* Menus are bucketed by group so each header appears once,
+           with a separator line above it. */
+        $grouped = [];
+        foreach ($menus as $key => $menu) {
+            $grouped[$menu['group']][$key] = $menu;
+        }
 
-        <li class="sidebar-dropdown <?= openMenu($menu['items'], $page) ?>">
-            <div class="dropdown-toggle">
-                <span class="toggle-label">
-                    <i class="<?= e($menu['icon']) ?>"></i>
-                    <span><?= e($menu['label']) ?></span>
-                </span>
-                <i class="fa-solid fa-chevron-down"></i>
-            </div>
-            <div class="dropdown-menu">
-                <?php foreach ($menu['items'] as $key => $item): ?>
-                <a href="dashboard.php?page=<?= urlencode($key) ?>" class="<?= activePage($key, $page) ?>">
-                    <i class="<?= e($item['icon']) ?>"></i> <?= e($item['label']) ?>
-                </a>
-                <?php endforeach; ?>
-            </div>
-        </li>
+        foreach ($grouped as $groupName => $groupMenus):
+        ?>
+            <li class="sidebar-divider" role="separator"></li>
+            <li class="sidebar-group-label"><?= e($groupName) ?></li>
+
+            <?php foreach ($groupMenus as $menu): ?>
+            <li class="sidebar-dropdown <?= openMenu($menu['items'], $page) ?>">
+                <div class="dropdown-toggle">
+                    <span class="toggle-label">
+                        <i class="<?= e($menu['icon']) ?>"></i>
+                        <span><?= e($menu['label']) ?></span>
+                    </span>
+                    <i class="fa-solid fa-chevron-down"></i>
+                </div>
+                <div class="dropdown-menu">
+                    <?php foreach ($menu['items'] as $key => $item): ?>
+                    <a href="dashboard.php?page=<?= urlencode($key) ?>" class="<?= activePage($key, $page) ?>">
+                        <i class="<?= e($item['icon']) ?>"></i> <?= e($item['label']) ?>
+                    </a>
+                    <?php endforeach; ?>
+                </div>
+            </li>
+            <?php endforeach; ?>
         <?php endforeach; ?>
     </ul>
 

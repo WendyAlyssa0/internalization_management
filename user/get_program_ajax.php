@@ -1,6 +1,7 @@
 <?php
 // user/get_program_ajax.php
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/program_eligibility.php';
 
 if (session_status() === PHP_SESSION_NONE) session_start();
 if (empty($_SESSION['user_id'])) {
@@ -32,13 +33,15 @@ try {
             partner.institution_name AS partner_name
         FROM programs p
         INNER JOIN users applicant ON applicant.id = ?
+        LEFT JOIN degree_programs degree
+            ON degree.campus_id = applicant.campus_id
+           AND degree.program_name = applicant.program
         LEFT JOIN countries c ON c.id = p.country_id
         LEFT JOIN partners partner ON partner.id = p.partner_id
         WHERE p.id = ?
           AND p.status IN ('Active', 'Upcoming')
-          AND p.end_date >= CURDATE()
-          AND p.eligible_account_type = applicant.account_type
-          AND (p.eligible_department = 'All Departments' OR p.eligible_department = applicant.department)
+          AND " . programApplicationWindowSql() . "
+          AND " . programEligibilitySql() . "
     ");
     $stmt->execute([(int)$_SESSION['user_id'], $programId]);
     $program = $stmt->fetch(PDO::FETCH_ASSOC);

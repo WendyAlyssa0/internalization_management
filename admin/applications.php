@@ -243,6 +243,53 @@ function docStatusClass(string $status): string {
 .sort-icon { font-size: 0.7rem; color: #cbd5e1; }
 .sort-icon--active { color: #2563eb; }
 
+/* Toolbar Layout Fix */
+.toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
+.search-wrap { flex: 1; min-width: 250px; max-width: 400px; }
+.tabs { display: flex; gap: 4px; background: #fff; border: 1px solid #e2e8f0; border-radius: 9999px; padding: 4px; }
+.tabs a { text-decoration: none; font-size: 0.875rem; font-weight: 500; color: #475569; padding: 6px 20px; border-radius: 9999px; transition: 0.2s; }
+.tabs a.active { background: #0f2044; color: #fff; }
+
+/* Filter Bar Layout Fix */
+.filter-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 20px; }
+.filter-bar select { flex: 1; min-width: 160px; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.875rem; color: #334155; background: #fff; }
+.filter-bar button { padding: 8px 16px; border-radius: 6px; border: none; background: #0f2044; color: #fff; font-weight: 500; font-size: 0.875rem; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: 0.2s; }
+.filter-bar button:hover { background: #1e3a8a; }
+
+.status-badge.status-submitted    { background: #e0f2fe; color: #0369a1; }
+.status-badge.status-under_review { background: #e0f2fe; color: #0369a1; }
+.status-badge.status-approved     { background: #dcfce7; color: #15803d; }
+.status-badge.status-rejected     { background: #fee2e2; color: #b91c1c; }
+
+/* Requirement review link */
+.review-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 6px;
+    background: #eff6ff; color: #2563eb; font-size: 0.75rem;
+    font-weight: 600; text-decoration: none; border: 1px solid #bfdbfe;
+}
+.review-link:hover { background: #dbeafe; }
+
+/* Toast */
+.toast {
+    position: fixed; bottom: 28px; right: 28px; z-index: 2000;
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 20px; border-radius: 8px; font-size: 0.875rem;
+    font-weight: 500; color: white; box-shadow: 0 10px 15px -3px rgba(0,0,0,.1);
+    transform: translateY(12px); opacity: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease; pointer-events: none;
+}
+.toast--show { opacity: 1; transform: translateY(0); }
+.toast--success { background: #0f2044; }
+.toast--error   { background: #dc2626; }
+
+/* Page-specific polish layered on top of users.css */
+.th-inner { display: inline-flex; align-items: center; gap: 6px; }
+.th-link { color: inherit; text-decoration: none; font-weight: 600; }
+.th-link:hover { color: #0f2044; }
+.sort-icon { font-size: 0.7rem; color: #cbd5e1; }
+.sort-icon--active { color: #2563eb; }
+
 .tabs { display: flex; gap: 4px; background: #fff; border: 1px solid #e2e8f0; border-radius: 9999px; padding: 4px; }
 .tabs a { text-decoration: none; font-size: 0.875rem; font-weight: 500; color: #475569; padding: 6px 20px; border-radius: 9999px; }
 .tabs a.active { background: #0f2044; color: #fff; }
@@ -476,7 +523,7 @@ function docStatusClass(string $status): string {
                 <h3>Application Details</h3>
                 <p>Review submitted application data.</p>
             </div>
-            <button class="modal-close" onclick="closeModal()" aria-label="Close"><i class="fa fa-xmark"></i></button>
+            <button class="modal-close" onclick="closeModal()" aria-label="Close"><i class="fa fa-times"></i></button>
         </div>
         <div class="modal-body">
             <div class="form-section-title">Applicant</div>
@@ -513,7 +560,7 @@ function docStatusClass(string $status): string {
     <div class="modal-box" style="max-width:440px;">
         <div class="modal-header">
             <div><h3 id="confirm-title">Confirm Action</h3></div>
-            <button class="modal-close" onclick="closeConfirm()" aria-label="Close"><i class="fa fa-xmark"></i></button>
+            <button class="modal-close" onclick="closeConfirm()" aria-label="Close"><i class="fa fa-times"></i></button>
         </div>
         <div class="modal-body">
             <div id="confirm-icon" style="text-align:center; margin-bottom:14px;"></div>

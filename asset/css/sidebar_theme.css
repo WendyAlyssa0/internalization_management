@@ -1,0 +1,80 @@
+/* Sidebar + topbar theme aligned with the login page blue.
+   Load AFTER dashboard.css (see dashboard.php). Same values as login.css:
+   --panel-from #3b82c8, --panel-to #2c6bb0, --panel-accent #ffe08a. */
+
+:root {
+    --panel-from: #3b82c8;
+    --panel-to:   #2c6bb0;
+    --panel-accent: #ffe08a;
+}
+
+/* ---------- Sidebar surface ---------- */
+.main-sidebar {
+    background: linear-gradient(160deg, var(--panel-from) 0%, var(--panel-to) 100%);
+}
+.main-sidebar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.35); }
+
+.sidebar-header,
+.sidebar-footer { border-color: rgba(255, 255, 255, 0.22); }
+
+.brand-logo,
+.brand-mark { border-color: rgba(255, 255, 255, 0.55); outline-color: rgba(255, 255, 255, 0.25); }
+.brand-mark { color: #fff; }
+.brand-text small { color: var(--panel-accent); }
+
+.sidebar-close,
+.sidebar-collapse { color: rgba(255, 255, 255, 0.85); border-color: rgba(255, 255, 255, 0.3); }
+
+/* ---------- Group headers + separators (U6) ---------- */
+.sidebar-group-label { color: rgba(255, 255, 255, 0.8); }
+.sidebar-divider {
+    height: 0;
+    margin: 10px 12px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.28);
+}
+.sidebar-divider + .sidebar-group-label { padding-top: 12px; }
+
+/* ---------- Links (higher contrast on the lighter blue) ---------- */
+.sidebar-menu > li > a,
+.dropdown-menu a,
+.dropdown-toggle { color: rgba(255, 255, 255, 0.92); }
+
+.sidebar-menu > li > a i,
+.dropdown-menu a i,
+.dropdown-toggle .toggle-label i,
+.dropdown-toggle > i.fa-chevron-down { color: rgba(255, 255, 255, 0.8); }
+
+.sidebar-menu > li > a:hover,
+.dropdown-menu a:hover,
+.dropdown-toggle:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+
+.sidebar-menu > li > a:hover i,
+.dropdown-menu a:hover i,
+.dropdown-toggle:hover .toggle-label i { color: var(--panel-accent); }
+
+/* active sub-link: soft white tint + gold rail */
+.dropdown-menu a.active { background: rgba(255, 255, 255, 0.2); color: #fff; }
+.dropdown-menu a.active::before { background: var(--panel-accent); box-shadow: 0 0 10px rgba(255, 224, 138, 0.6); }
+.dropdown-menu a.active i { color: var(--panel-accent); filter: none; }
+
+/* Home active: white pill with blue text */
+.sidebar-menu > li > a.top-link.active {
+    background: #fff;
+    color: var(--panel-to);
+    box-shadow: 0 6px 16px rgba(20, 60, 110, 0.25);
+}
+.sidebar-menu > li > a.top-link.active i { color: var(--panel-to); }
+
+.sidebar-dropdown.open .dropdown-toggle,
+.sidebar-dropdown.open .dropdown-toggle .toggle-label i,
+.sidebar-dropdown.open .dropdown-toggle > i.fa-chevron-down { color: #fff; }
+
+/* ---------- Logout card ---------- */
+.logout-btn { border-color: rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.1); color: #fff; }
+.logout-btn i { color: var(--panel-accent); }
+.logout-btn .logout-sub { color: rgba(255, 255, 255, 0.8); }
+.logout-btn:hover { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.55); }
+
+/* ---------- Mobile overlay + topbar avatar ---------- */
+.sidebar-overlay { background: rgba(20, 60, 110, 0.45); }
+.user-avatar { background: var(--panel-to); }

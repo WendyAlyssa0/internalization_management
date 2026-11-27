@@ -91,7 +91,10 @@ if ($view === 'new') {
     $whereA .= " AND LOWER(d.status) = 'pending'";
 }
 if ($applicationId > 0) {
-    $whereA .= " AND d.application_id = :application_id";
+    $whereA .= " AND EXISTS (
+        SELECT 1 FROM applications app
+        WHERE app.id = :application_id AND app.applicant_id = d.user_id
+    )";
     $paramsA[':application_id'] = $applicationId;
 }
 if ($scopedCampusId > 0) {
@@ -123,7 +126,6 @@ foreach ($stmtA->fetchAll(PDO::FETCH_ASSOC) as $row) {
 
 /* =========================================================
    SOURCE B: user_documents table (applicant requirement uploads)
-   Applicant requirement uploads are reviewed from this same screen.
 ========================================================= */
 $docsFromApplicants = [];
 
@@ -156,10 +158,13 @@ if ($view !== 'new') {
             $paramsB[':type'] = $type;
         }
     }
-    /* BUG FIX: these two filters used to sit inside the type check above, so
-       "Review documents" only filtered applicant uploads when a type was also chosen. */
     if ($applicationId > 0) {
-        $whereB .= " AND ud.application_id = :application_id";
+        $whereB .= " AND EXISTS (
+            SELECT 1 FROM applications app
+            WHERE app.id = :application_id
+              AND app.applicant_id = ud.user_id
+              AND app.program_id = pr.program_id
+        )";
         $paramsB[':application_id'] = $applicationId;
     }
     if ($scopedCampusId > 0) {
@@ -213,8 +218,7 @@ $documents  = array_slice($allDocs, $offset, $limit);
 ========================= */
 $canReview = isApprover() || isAdmin() || isSuperAdmin();
 $canDelete = canManageSystem() || isAdmin() || isSuperAdmin();
-/* BUG FIX: this list used to load for every logged-in user, exposing all applicants' names.
-   Now admins only, and coordinators only see their own campus. */
+
 $applicationReviews = [];
 if ($isAdminRole) {
 $reviewWhere = $scopedCampusId > 0 ? 'WHERE u.campus_id = ?' : '';
@@ -222,16 +226,15 @@ $stmtR = $pdo->prepare("
     SELECT a.id, a.applicant_id, a.program_id, a.status,
            CONCAT_WS(' ', u.first_name, u.last_name) AS applicant,
            p.program_name,
-           COUNT(DISTINCT CASE WHEN pr.is_required = 1 THEN pr.requirement_id END) AS required_count,
-           COUNT(DISTINCT CASE WHEN pr.is_required = 1 AND ud.id IS NOT NULL THEN pr.requirement_id END) AS uploaded_count
+           COUNT(DISTINCT CASE WHEN pr.is_required = 1 THEN pr.id END) AS required_count,
+           COUNT(DISTINCT CASE WHEN pr.is_required = 1 AND ud.id IS NOT NULL THEN pr.id END) AS uploaded_count
     FROM applications a
     LEFT JOIN users u ON u.id = a.applicant_id
     LEFT JOIN programs p ON p.id = a.program_id
     LEFT JOIN program_requirements pr ON pr.program_id = a.program_id
     LEFT JOIN user_documents ud
-        ON ud.application_id = a.id
-       AND ud.user_id = a.applicant_id
-       AND ud.requirement_id = pr.requirement_id
+        ON ud.user_id = a.applicant_id
+       AND ud.requirement_id = pr.id
     $reviewWhere
     GROUP BY a.id, a.applicant_id, a.program_id, a.status, u.first_name, u.last_name, p.program_name
     ORDER BY a.created_at DESC
@@ -244,6 +247,141 @@ $applicationReviews = $stmtR->fetchAll(PDO::FETCH_ASSOC);
 
 <link rel="stylesheet" href="../asset/css/applications.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<!-- Added FontAwesome just in case it's missing from your header -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+<style>
+/* =========================================================
+   INJECTED MODAL CSS - FIXES THE UNSTYLED LAYOUT IN SCREENSHOT
+========================================================= */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(15, 23, 42, 0.5);
+    backdrop-filter: blur(4px);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.modal-overlay.open {
+    display: flex;
+}
+.modal-box {
+    background: #fff;
+    border-radius: 12px;
+    width: 100%;
+    max-width: 480px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    overflow: hidden;
+    transform: scale(0.95);
+    opacity: 0;
+    transition: all 0.2s ease;
+}
+.modal-overlay.open .modal-box {
+    transform: scale(1);
+    opacity: 1;
+}
+.modal-box--sm { max-width: 400px; }
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid #e2e8f0;
+}
+.modal-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #0f172a;
+}
+.modal-close {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: #64748b;
+    padding: 4px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+}
+.modal-close:hover { background: #f1f5f9; }
+
+.confirm-body {
+    padding: 24px 20px;
+    text-align: center;
+}
+.confirm-icon-wrap {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 16px;
+}
+.confirm-icon-wrap--view    { background: #dbeafe; color: #2563eb; }
+.confirm-icon-wrap--approve { background: #d1fae5; color: #10b981; }
+.confirm-icon-wrap--reject  { background: #fee2e2; color: #ef4444; }
+.confirm-icon-wrap--delete  { background: #fef3c7; color: #f59e0b; }
+
+.confirm-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #0f172a;
+    margin: 0 0 8px;
+}
+.confirm-message {
+    font-size: 14px;
+    color: #64748b;
+    margin: 0;
+    line-height: 1.5;
+}
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 16px 20px;
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+}
+.btn-cancel {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #475569;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.btn-cancel:hover { background: #f1f5f9; }
+.btn-action {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: none;
+    color: #fff;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+}
+.btn-action:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-action--view    { background: #2563eb; }
+.btn-action--view:hover { background: #1d4ed8; }
+.btn-action--approve { background: #10b981; }
+.btn-action--approve:hover { background: #059669; }
+.btn-action--reject  { background: #ef4444; }
+.btn-action--reject:hover { background: #dc2626; }
+.btn-action--delete  { background: #f59e0b; }
+.btn-action--delete:hover { background: #d97706; }
+</style>
 
 <div class="page-header">
     <h2>Document Management</h2>
@@ -344,28 +482,35 @@ $applicationReviews = $stmtR->fetchAll(PDO::FETCH_ASSOC);
     <td><?= h(date('M d, Y', strtotime((string)$d['created_at']))) ?></td>
 
     <td class="action-btns">
-
         <?php if ($linkable): ?>
-            <a href="<?= h($href) ?>" target="_blank" rel="noopener" class="btn-view">
+            <button type="button" class="btn-view" title="View document"
+                    onclick="confirmAction('view', <?= (int)$d['id'] ?>, '<?= h($d['source']) ?>', <?= h(json_encode($href, JSON_UNESCAPED_SLASHES)) ?>)">
                 <i class="fa fa-eye"></i>
-            </a>
+            </button>
+        <?php else: ?>
+            <!-- Fallback if file path check fails, show the button anyway to avoid missing buttons -->
+            <button type="button" class="btn-view" title="View document" onclick="alert('File not found or path invalid.')">
+                <i class="fa fa-eye"></i>
+            </button>
         <?php endif; ?>
 
-        <?php if ($canReview): ?>
-                <button class="btn-approve" onclick="confirmAction('approve', <?= (int)$d['id'] ?>, '<?= h($d['source']) ?>')">
-                    <i class="fa fa-check"></i>
-                </button>
-
-                <button class="btn-reject" onclick="confirmAction('reject', <?= (int)$d['id'] ?>, '<?= h($d['source']) ?>')">
-                    <i class="fa fa-close"></i>
-                </button>
+        <?php if ($canReview && $statusKey === 'pending'): ?>
+            <button type="button" class="btn-approve" title="Approve document"
+                    onclick="confirmAction('approve', <?= (int)$d['id'] ?>, '<?= h($d['source']) ?>')">
+                <i class="fa fa-check"></i>
+            </button>
+            <button type="button" class="btn-reject" title="Reject document"
+                    onclick="confirmAction('reject', <?= (int)$d['id'] ?>, '<?= h($d['source']) ?>')">
+                <i class="fa fa-close"></i>
+            </button>
         <?php endif; ?>
+
         <?php if ($canDelete): ?>
-                <button class="btn-delete" onclick="confirmAction('delete', <?= (int)$d['id'] ?>, '<?= h($d['source']) ?>')">
-                    <i class="fa fa-trash"></i>
-                </button>
+            <button type="button" class="btn-delete" title="Delete document"
+                    onclick="confirmAction('delete', <?= (int)$d['id'] ?>, '<?= h($d['source']) ?>')">
+                <i class="fa fa-trash"></i>
+            </button>
         <?php endif; ?>
-
     </td>
 </tr>
     <?php endforeach; ?>
@@ -414,12 +559,13 @@ $applicationReviews = $stmtR->fetchAll(PDO::FETCH_ASSOC);
 </div>
 
 <!-- CONFIRM MODAL -->
-<div id="confirmModal" class="modal-overlay" onclick="closeConfirmOutside(event)">
+<div id="confirmModal" class="modal-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="confirm-title" onclick="closeConfirmOutside(event)">
     <div class="modal-box modal-box--sm">
 
         <div class="modal-header">
             <h3 id="confirm-title">Confirm Action</h3>
-            <button class="modal-close" onclick="closeConfirm()">
+            <button type="button" class="modal-close" onclick="closeConfirm()" aria-label="Close">
                 <i class="ti ti-x"></i>
             </button>
         </div>
@@ -433,8 +579,8 @@ $applicationReviews = $stmtR->fetchAll(PDO::FETCH_ASSOC);
         </div>
 
         <div class="modal-footer">
-            <button class="btn-cancel" onclick="closeConfirm()">Cancel</button>
-            <button id="confirm-btn" class="btn-action" onclick="executeAction()">
+            <button type="button" class="btn-cancel" onclick="closeConfirm()">Cancel</button>
+            <button type="button" id="confirm-btn" class="btn-action" onclick="executeAction()">
                 <i id="confirm-btn-icon" style="font-size:13px"></i>
                 <span id="confirm-btn-label">Confirm</span>
             </button>
@@ -447,103 +593,166 @@ $applicationReviews = $stmtR->fetchAll(PDO::FETCH_ASSOC);
 const DOCS_CSRF = <?= json_encode($csrfToken) ?>;
 
 let pendingAction = null;
-let pendingId = null;
+let pendingId     = null;
 let pendingSource = 'document';
+let pendingHref   = null;
+let isSubmitting  = false;
 
 const ACTION_CONFIG = {
+    view: {
+        title:     'View Document',
+        heading:   'Open this document?',
+        message:   'The document will open in a new tab.',
+        icon:      'ti ti-eye',
+        iconColor: '#2563eb',
+        wrapClass: 'confirm-icon-wrap--view',
+        btnClass:  'btn-action--view',
+        btnIcon:   'ti ti-external-link',
+        btnLabel:  'Open',
+        endpoint:  null
+    },
     approve: {
-        title:    'Approve Document',
-        heading:  'Approve this document?',
-        message:  'This will mark the document as approved and notify the uploader.',
-        icon:     'ti ti-circle-check',
-        iconColor:'#10b981',
-        wrapClass:'confirm-icon-wrap--approve',
-        btnClass: 'btn-action--approve',
-        btnIcon:  'ti ti-check',
-        btnLabel: 'Approve',
-        endpoint: './document_approve.php'
+        title:     'Approve Document',
+        heading:   'Approve this document?',
+        message:   'This will mark the document as approved and notify the uploader.',
+        icon:      'ti ti-circle-check',
+        iconColor: '#10b981',
+        wrapClass: 'confirm-icon-wrap--approve',
+        btnClass:  'btn-action--approve',
+        btnIcon:   'ti ti-check',
+        btnLabel:  'Approve',
+        endpoint:  './document_approve.php'
     },
     reject: {
-        title:    'Reject Document',
-        heading:  'Reject this document?',
-        message:  'This will mark the document as rejected. The uploader will be informed.',
-        icon:     'ti ti-circle-x',
-        iconColor:'#ef4444',
-        wrapClass:'confirm-icon-wrap--reject',
-        btnClass: 'btn-action--reject',
-        btnIcon:  'ti ti-x',
-        btnLabel: 'Reject',
-        endpoint: './document_reject.php'
+        title:     'Reject Document',
+        heading:   'Reject this document?',
+        message:   'This will mark the document as rejected. The uploader will be informed.',
+        icon:      'ti ti-circle-x',
+        iconColor: '#ef4444',
+        wrapClass: 'confirm-icon-wrap--reject',
+        btnClass:  'btn-action--reject',
+        btnIcon:   'ti ti-x',
+        btnLabel:  'Reject',
+        endpoint:  './document_reject.php'
     },
     delete: {
-        title:    'Delete Document',
-        heading:  'Delete this document?',
-        message:  'This action is permanent and cannot be undone. The file will be removed.',
-        icon:     'ti ti-trash',
-        iconColor:'#f59e0b',
-        wrapClass:'confirm-icon-wrap--delete',
-        btnClass: 'btn-action--delete',
-        btnIcon:  'ti ti-trash',
-        btnLabel: 'Delete',
-        endpoint: './document_delete.php'
+        title:     'Delete Document',
+        heading:   'Delete this document?',
+        message:   'This action is permanent and cannot be undone. The file will be removed.',
+        icon:      'ti ti-trash',
+        iconColor: '#f59e0b',
+        wrapClass: 'confirm-icon-wrap--delete',
+        btnClass:  'btn-action--delete',
+        btnIcon:   'ti ti-trash',
+        btnLabel:  'Delete',
+        endpoint:  './document_delete.php'
     }
 };
 
-function confirmAction(action, id, source = 'document') {
-    pendingAction = action;
-    pendingId = id;
-    pendingSource = source;
+function confirmAction(action, id, source = 'document', href = null) {
     const c = ACTION_CONFIG[action];
+    if (!c) return;
+
+    pendingAction = action;
+    pendingId     = id;
+    pendingSource = source;
+    pendingHref   = href;
+    isSubmitting  = false;
 
     document.getElementById('confirm-title').textContent   = c.title;
     document.getElementById('confirm-heading').textContent = c.heading;
     document.getElementById('confirm-message').textContent = c.message;
 
     const iconEl = document.getElementById('confirm-icon');
-    iconEl.className = c.icon;
+    iconEl.className   = c.icon;
     iconEl.style.color = c.iconColor;
 
-    const wrap = document.getElementById('confirm-icon-wrap');
-    wrap.className = 'confirm-icon-wrap ' + c.wrapClass;
+    document.getElementById('confirm-icon-wrap').className =
+        'confirm-icon-wrap ' + c.wrapClass;
 
     const btn = document.getElementById('confirm-btn');
     btn.className = 'btn-action ' + c.btnClass;
+    btn.disabled  = false;
+
     document.getElementById('confirm-btn-icon').className = c.btnIcon;
     document.getElementById('confirm-btn-label').textContent = c.btnLabel;
 
     document.getElementById('confirmModal').classList.add('open');
+    btn.focus();
 }
 
 function closeConfirm() {
     document.getElementById('confirmModal').classList.remove('open');
+    pendingAction = null;
+    pendingId     = null;
+    pendingSource = 'document';
+    pendingHref   = null;
+    isSubmitting  = false;
 }
 
 function closeConfirmOutside(e) {
     if (e.target.id === 'confirmModal') closeConfirm();
 }
 
-function executeAction() {
-    if (!pendingAction || !pendingId) return;
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeConfirm();
+});
 
+function executeAction() {
+    if (isSubmitting || !pendingAction || pendingId === null) return;
+
+    const cfg = ACTION_CONFIG[pendingAction];
+
+    /* View: no AJAX call, just open the file in a new tab */
+    if (pendingAction === 'view') {
+        if (pendingHref) window.open(pendingHref, '_blank', 'noopener');
+        closeConfirm();
+        return;
+    }
+
+    if (!cfg.endpoint) return;
+
+    isSubmitting = true;
     const btn = document.getElementById('confirm-btn');
+    const labelEl = document.getElementById('confirm-btn-label');
+    const originalLabel = labelEl.textContent;
     btn.disabled = true;
+    labelEl.textContent = 'Working…';
 
     const formData = new FormData();
     formData.append('id', pendingId);
     formData.append('csrf_token', DOCS_CSRF);
     formData.append('source', pendingSource);
 
-    fetch(ACTION_CONFIG[pendingAction].endpoint, { method: 'POST', body: formData })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                location.reload();
-            } else {
-                alert(data.message || 'Action failed');
-            }
-        })
-        .catch(() => alert('Server error.'))
-        .finally(() => { closeConfirm(); btn.disabled = false; });
+    fetch(cfg.endpoint, {
+        method: 'POST',
+        body: formData,
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(async r => {
+        const text = await r.text();
+        let data;
+        try { data = JSON.parse(text); }
+        catch { throw new Error('Invalid server response'); }
+        if (!r.ok) throw new Error(data.message || 'Request failed (' + r.status + ')');
+        return data;
+    })
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.message || 'Action failed');
+            btn.disabled = false;
+            labelEl.textContent = originalLabel;
+            isSubmitting = false;
+        }
+    })
+    .catch(err => {
+        alert(err.message || 'Server error.');
+        btn.disabled = false;
+        labelEl.textContent = originalLabel;
+        isSubmitting = false;
+    });
 }
 
 /* Debounced search → reload with ?search= */

@@ -1,43 +1,49 @@
 /* ============================================================
-   Login page — consolidated and re-themeable
-   To re-theme (e.g. PSU colors), change ONLY the brand tokens.
+   Login page, consolidated and re-themeable (soft blue theme, U1)
+   To re-theme, change ONLY the tokens in :root.
    ============================================================ */
 :root {
-    /* Brand scale (currently slate navy) */
-    --brand-900: #1c3a5c;
-    --brand-800: #22456b;
-    --brand-700: #2a527d;
-    --brand-600: #33608f;
-    --brand-grad-from: #244a72;
-    --brand-grad-to:   #1a3655;
+    /* Text / heading color on white (kept dark for readability) */
+    --brand-900: #1e3a5f;
+    --brand-800: #25497a;
 
-    --accent:      #5b9bf0;
-    --accent-rgb:  91, 155, 240;           /* used for rgba() glows/lines */
+    /* Left panel + primary button: mid-tone blue, not near-black */
+    --panel-from: #3b82c8;
+    --panel-to:   #2c6bb0;
+    --btn-from:   #3b82c8;
+    --btn-to:     #2c6bb0;
+    --btn-hover-from: #2f73b8;
+    --btn-hover-to:   #25609d;
+
+    /* Accent on white (focus rings, links) */
+    --accent:      #3b82c8;
+    --accent-rgb:  59, 130, 200;
     --accent-glow: rgba(var(--accent-rgb), 0.35);
-    --accent-text: #2f6fcf;                /* accent for text on white, AA */
+    --accent-text: #2563a8;                /* AA on white */
+
+    /* Accent on the blue panel (warm gold stands out on blue) */
+    --panel-accent: #ffe08a;
 
     /* Backdrop */
-    --backdrop-1: #dbe4ee;
-    --backdrop-2: #c9d5e3;
-    --backdrop-hi: #e6edf5;
-    --backdrop-lo: #c2d0e0;
+    --backdrop-1: #eaf1fa;
+    --backdrop-2: #d7e4f4;
 
     /* Text */
     --text-main:  #1e293b;
-    --text-muted: #5b6b80;                 /* darker than before for AA on white */
-    --text-light: #c3cddb;                 /* on navy only */
-    --text-faint: #9fb0c6;                 /* on navy, decorative */
-    --text-icon:  #8493a8;                 /* icons/footer on white */
+    --text-muted: #55657a;
+    --text-light: rgba(255, 255, 255, 0.92);   /* on blue panel */
+    --text-faint: rgba(255, 255, 255, 0.78);   /* on blue panel */
+    --text-icon:  #7b8aa0;
 
     --bg-input: #f4f7fb;
     --border-input: #d6dee9;
     --border-focus: var(--accent);
 
-    --danger: #b91c1c;                     /* AA on danger-bg */
+    --danger: #b91c1c;
     --danger-bg: #fef2f2;
     --danger-border: #fecaca;
 
-    --overlay: rgba(28, 58, 92, 0.85);
+    --overlay: rgba(44, 107, 176, 0.88);
 
     --radius-sm: 8px;
     --radius-md: 12px;
@@ -47,71 +53,65 @@
     --font-body:    'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
     --font-label:   'Oswald', 'Arial Narrow', sans-serif;
 
-    --shadow-card: 0 25px 50px -12px rgba(28, 58, 92, 0.28);
+    --shadow-card: 0 25px 50px -12px rgba(44, 107, 176, 0.25);
     --shadow-input: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
     --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* ============================================================
+   PAGE + CARD
+   ============================================================ */
 body {
     margin: 0;
-    font-family: var(--font-body);
-    background-color: var(--backdrop-1);
-    background-image:
-        radial-gradient(circle at 25% 20%, var(--backdrop-hi) 0%, transparent 55%),
-        radial-gradient(circle at 75% 85%, var(--backdrop-lo) 0%, transparent 60%),
-        linear-gradient(160deg, var(--backdrop-1) 0%, var(--backdrop-2) 100%);
     min-height: 100vh;
-    min-height: 100dvh;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 24px;
-    -webkit-font-smoothing: antialiased;
+    font-family: var(--font-body);
+    color: var(--text-main);
+    background: linear-gradient(135deg, var(--backdrop-1), var(--backdrop-2));
 }
 
-/* ---------- Card ---------- */
 .login-card {
     display: flex;
     width: 100%;
-    max-width: 1040px;
-    min-height: 620px;
+    max-width: 1000px;
+    min-height: 600px;
     background: #fff;
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-card), 0 0 0 1px rgba(255, 255, 255, 0.6) inset;
     overflow: hidden;
-    position: relative;
-    z-index: 1;
+    box-shadow: var(--shadow-card);
 }
 
 /* ============================================================
-   LEFT PANEL
+   LEFT PANEL (brand)
    ============================================================ */
 .login-left {
-    flex: 0 0 45%;
-    background-color: var(--brand-900);
-    background-image: linear-gradient(170deg, var(--brand-grad-from) 0%, var(--brand-grad-to) 100%);
     position: relative;
+    flex: 1;
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    padding: 48px 40px;
+    padding: 56px 48px;
     overflow: hidden;
+    color: #fff;
+    background: linear-gradient(160deg, var(--panel-from) 0%, var(--panel-to) 100%);
 }
 
 .top-line {
     position: absolute;
-    inset: 0 0 auto 0;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, var(--accent), transparent);
-    opacity: 0.8;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    background: var(--panel-accent);
+    z-index: 3;
 }
 
 .world-map {
     position: absolute;
     inset: 0;
-    background-image: radial-gradient(circle, rgba(255,255,255,0.08) 1px, transparent 1px);
+    background-image: radial-gradient(circle, rgba(255,255,255,0.18) 1px, transparent 1px);
     background-size: 12px 12px;
     opacity: 0.6;
     z-index: 1;
@@ -128,20 +128,20 @@ body {
 
 .route-line {
     fill: none;
-    stroke: rgba(var(--accent-rgb), 0.5);
+    stroke: rgba(255, 255, 255, 0.6);
     stroke-width: 1.5;
     stroke-dasharray: 6 6;
     animation: dashFlow 20s linear infinite;
 }
 
 .route-node {
-    fill: var(--accent);
-    filter: drop-shadow(0 0 6px var(--accent-glow));
+    fill: #fff;
+    filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.5));
 }
 
 .route-node--home {
-    fill: #fff;
-    stroke: var(--accent);
+    fill: var(--panel-accent);
+    stroke: #fff;
     stroke-width: 2;
     animation: pulseNode 2s ease-in-out infinite;
 }
@@ -178,7 +178,7 @@ body {
 }
 
 .left-title .accent {
-    color: var(--accent);
+    color: var(--panel-accent);
     display: inline-block;
     margin-bottom: 4px;
 }
@@ -186,7 +186,7 @@ body {
 .left-underline {
     width: 40px;
     height: 3px;
-    background-color: var(--accent);
+    background-color: var(--panel-accent);
     border-radius: 2px;
     margin-bottom: 20px;
 }
@@ -215,12 +215,12 @@ body {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background-color: rgba(255, 255, 255, 0.25);
+    background-color: rgba(255, 255, 255, 0.4);
     transition: var(--transition);
 }
 
 .left-dots .dot.active {
-    background-color: var(--accent);
+    background-color: var(--panel-accent);
     width: 20px;
     border-radius: 3px;
 }
@@ -377,7 +377,7 @@ body {
 .options input[type="checkbox"] {
     width: 16px;
     height: 16px;
-    accent-color: var(--brand-900);
+    accent-color: var(--accent);
     cursor: pointer;
 }
 
@@ -398,8 +398,8 @@ body {
     justify-content: center;
     gap: 12px;
     padding: 16px 24px;
-    background-color: var(--brand-900);
-    background-image: linear-gradient(180deg, var(--brand-700) 0%, var(--brand-grad-to) 100%);
+    background-color: var(--btn-to);
+    background-image: linear-gradient(180deg, var(--btn-from) 0%, var(--btn-to) 100%);
     color: #fff;
     border: none;
     border-radius: var(--radius-sm);
@@ -408,13 +408,13 @@ body {
     font-weight: 600;
     cursor: pointer;
     transition: var(--transition);
-    box-shadow: 0 4px 6px -1px rgba(28, 58, 92, 0.25);
+    box-shadow: 0 4px 6px -1px rgba(44, 107, 176, 0.3);
 }
 
 .login-btn:hover:not(:disabled) {
-    background-image: linear-gradient(180deg, var(--brand-600) 0%, var(--brand-grad-from) 100%);
+    background-image: linear-gradient(180deg, var(--btn-hover-from) 0%, var(--btn-hover-to) 100%);
     transform: translateY(-1px);
-    box-shadow: 0 6px 10px -1px rgba(28, 58, 92, 0.3);
+    box-shadow: 0 6px 10px -1px rgba(44, 107, 176, 0.35);
 }
 
 .login-btn:active:not(:disabled) { transform: translateY(0); }
@@ -473,21 +473,21 @@ body {
 .globe-loader { width: 120px; height: 120px; margin: 0 auto 24px; }
 .globe-svg    { width: 100%; height: 100%; }
 
-.globe-outline { fill: none; stroke: rgba(255, 255, 255, 0.25); stroke-width: 1.5; }
-.globe-fill    { fill: var(--brand-700); }
+.globe-outline { fill: none; stroke: rgba(255, 255, 255, 0.5); stroke-width: 1.5; }
+.globe-fill    { fill: rgba(255, 255, 255, 0.25); }
 
 .globe-lines ellipse,
 .globe-lines line {
     fill: none;
-    stroke: rgba(var(--accent-rgb), 0.35);
+    stroke: rgba(255, 255, 255, 0.45);
     stroke-width: 1;
 }
 
 .plane-arc-guide { fill: none; stroke: none; }
 
 .plane-icon path {
-    fill: var(--accent);
-    filter: drop-shadow(0 0 4px var(--accent-glow));
+    fill: var(--panel-accent);
+    filter: drop-shadow(0 0 4px rgba(255, 224, 138, 0.6));
 }
 
 .loader-content h2 {
@@ -501,7 +501,7 @@ body {
 .progress-bar {
     width: 200px;
     height: 3px;
-    background-color: rgba(255, 255, 255, 0.15);
+    background-color: rgba(255, 255, 255, 0.25);
     border-radius: 2px;
     margin: 0 auto;
     overflow: hidden;
@@ -510,7 +510,7 @@ body {
 .progress {
     width: 100%;
     height: 100%;
-    background-color: var(--accent);
+    background-color: var(--panel-accent);
     border-radius: 2px;
     transform: scaleX(0);
     transform-origin: left;
