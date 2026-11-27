@@ -127,7 +127,7 @@ $unreadCount = (int)$stmt->fetchColumn();
     /* Charts Grid */
     .charts-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr;
         gap: 24px;
     }
 
@@ -318,17 +318,6 @@ $unreadCount = (int)$stmt->fetchColumn();
 
     <!-- Charts Section -->
     <div class="charts-grid" id="charts">
-        <!-- Bar Chart: Application Statuses -->
-        <div class="chart-card">
-            <div class="chart-header">
-                <h3>Application Status Overview</h3>
-                <i class="fa-solid fa-chart-simple" style="color: var(--text-light);"></i>
-            </div>
-            <div class="chart-container">
-                <canvas id="statusBarChart"></canvas>
-            </div>
-        </div>
-
         <!-- Doughnut Chart: Total Progress -->
         <div class="chart-card">
             <div class="chart-header">
@@ -358,50 +347,6 @@ document.addEventListener('DOMContentLoaded', function() {
     Chart.defaults.font.family = "'Inter', sans-serif";
     Chart.defaults.color = '#64748b';
     Chart.defaults.font.size = 12;
-
-    // --- Bar Chart ---
-    const barCtx = document.getElementById('statusBarChart').getContext('2d');
-    new Chart(barCtx, {
-        type: 'bar',
-        data: {
-            labels: ['Pending', 'Under Review', 'Approved', 'Rejected'],
-            datasets: [{
-                label: 'Applications',
-                data: [
-                    statusCounts.pending, 
-                    statusCounts.under_review, 
-                    statusCounts.approved, 
-                    statusCounts.rejected
-                ],
-                backgroundColor: [
-                    '#e4b134', // Pending (Gold)
-                    '#2563eb', // Under Review (Blue)
-                    '#16a34a', // Approved (Green)
-                    '#dc2626'  // Rejected (Red)
-                ],
-                borderRadius: 6,
-                barThickness: 32
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false } 
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: { stepSize: 1, precision: 0, color: '#94a3b8' },
-                    grid: { color: '#f1f5f9', drawBorder: false }
-                },
-                x: {
-                    ticks: { color: '#64748b', font: { weight: '600' } },
-                    grid: { display: false, drawBorder: false }
-                }
-            }
-        }
-    });
 
     // --- Doughnut Chart ---
     const doughnutCtx = document.getElementById('statusDoughnutChart').getContext('2d');

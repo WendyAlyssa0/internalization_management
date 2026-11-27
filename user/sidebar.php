@@ -6,7 +6,6 @@ $currentPage = $page ?? 'home';
    item whose target id is not present on the page. */
 $sectionsDocs = [['forms', 'Application Forms'], ['required-documents', 'Required Documents']];
 $pageSections = [
-    'home'                  => [['overview', 'Overview'], ['stats', 'Statistics'], ['charts', 'Charts']],
     'documents'             => $sectionsDocs,
     'forms_requirements'    => $sectionsDocs,
     'program_detail'        => [['program-description', 'Description'], ['program-requirements', 'Requirements']],
@@ -53,7 +52,6 @@ $gDocs      = ['documents', 'forms_requirements'];
         <a href="?page=home" class="nav-link <?= $currentPage === 'home' ? 'active' : '' ?>"<?= $ariaCurrent($gHome) ?>>
             <i class="fa-solid fa-house"></i> <span>Dashboard</span>
         </a>
-        <?php $renderSubnav($gHome); ?>
         <a href="?page=available_programs" class="nav-link <?= in_array($currentPage, $gPrograms) ? 'active' : '' ?>"<?= $ariaCurrent($gPrograms) ?>>
             <i class="fa-solid fa-globe"></i> <span>Available Programs</span>
         </a>
