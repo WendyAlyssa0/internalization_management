@@ -516,13 +516,13 @@ $facultyRequirements = [
       </div>
       <div class="footer-col">
         <h5>Connect</h5>
-        <ul><li><a href="#">Facebook</a></li><li><a href="#">Instagram</a></li><li><a href="#">LinkedIn</a></li></ul>
+        <ul><li><a href="#">Facebook</a></li><li><a href="#">Instagram</a></li></ul>
       </div>
     </div>
     <div class="footer-bottom">
       <p>&copy; <?= date('Y') ?> Pangasinan State University · Office of International Affairs. All rights reserved.</p>
       <div class="footer-socials">
-        <a href="#" title="Facebook">f</a><a href="#" title="Instagram">ig</a><a href="#" title="LinkedIn">in</a>
+        <a href="#" title="Facebook">f</a><a href="#" title="Instagram">ig</a>
       </div>
     </div>
   </div>
