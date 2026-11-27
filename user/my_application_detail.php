@@ -383,7 +383,7 @@ $badgeClass = match ($status) {
      APPLICATION DETAILS
 ===================================================== -->
 
-<section class="content-card" aria-labelledby="application-title">
+<section class="content-card" id="application-details" aria-labelledby="application-title">
 
     <div class="page-header"
          style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
@@ -519,7 +519,7 @@ $badgeClass = match ($status) {
      PROGRAM REQUIREMENTS
 ===================================================== -->
 
-<section class="requirements-section">
+<section class="requirements-section" id="application-requirements">
 
     <div class="requirements-header">
 

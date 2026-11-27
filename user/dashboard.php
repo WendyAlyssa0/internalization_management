@@ -278,6 +278,17 @@ $pageStyles = [
         .nav-link.active { background: rgba(255, 255, 255, 0.1); color: var(--white); font-weight: 600; border-color: rgba(255, 255, 255, 0.1); }
         .nav-link.active i { color: var(--psu-gold); opacity: 1; }
 
+        /* In-page section sub-items (scroll-spy) */
+        html { scroll-behavior: smooth; }
+        main.container [id] { scroll-margin-top: calc(var(--topbar-h) + 16px); }
+        .nav-subnav { list-style: none; margin: 2px 0 8px 26px; padding: 0 0 0 12px; border-left: 1px solid rgba(255,255,255,.12); display: flex; flex-direction: column; gap: 2px; }
+        .nav-subnav[hidden], .nav-subnav li[hidden] { display: none; }
+        .nav-sublink { position: relative; display: block; padding: 6px 12px; border-radius: 6px; font-size: .8rem; font-weight: 500; color: #94a3b8; transition: var(--transition); }
+        .nav-sublink:hover { color: var(--white); background: rgba(255,255,255,.05); }
+        .nav-sublink.is-current { color: var(--psu-gold); background: rgba(228,177,52,.12); font-weight: 600; }
+        .nav-sublink.is-current::before { content: ""; position: absolute; left: -13px; top: 50%; width: 2px; height: 60%; transform: translateY(-50%); background: var(--psu-gold); border-radius: 2px; }
+        @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
         /* =====================================================
            3. MAIN CONTENT AREA
            ===================================================== */
@@ -786,6 +797,7 @@ $pageStyles = [
 </main>
 
 <script src="../asset/js/sidebar.js"></script>
+<script src="../asset/js/user_scrollspy.js"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         const notifWrapper = document.getElementById('notifWrapper');

@@ -76,7 +76,7 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
     <?php endif; ?>
 
-    <div style="margin-bottom: 24px;">
+    <div id="program-description" style="margin-bottom: 24px;">
         <h3 style="font-size: 1rem; color: var(--navy-800); margin-bottom: 12px;">Description</h3>
         <p style="color: var(--gray-600); line-height: 1.6;"><?= nl2br(h($program['description'] ?? 'No description provided.')) ?></p>
     </div>
@@ -96,7 +96,7 @@ $requirements = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
     </div>
 
-    <div style="margin-bottom: 24px;">
+    <div id="program-requirements" style="margin-bottom: 24px;">
         <h3 style="font-size: 1rem; color: var(--navy-800); margin-bottom: 12px;">Requirements</h3>
         <?php if ($requirements): ?>
             <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px;">

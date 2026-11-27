@@ -255,7 +255,7 @@ $unreadCount = (int)$stmt->fetchColumn();
 <div class="home-dashboard">
 
     <!-- Welcome Header -->
-    <div class="welcome-header">
+    <div class="welcome-header" id="overview">
         <h2>Welcome back, <?= h($user['first_name'] ?? 'Applicant') ?>!</h2>
         <p>Here's an overview of your international application activity.</p>
     </div>
@@ -285,7 +285,7 @@ $unreadCount = (int)$stmt->fetchColumn();
     <?php endif; ?>
 
     <!-- Stat Cards -->
-    <div class="stat-grid">
+    <div class="stat-grid" id="stats">
         <div class="stat-card">
             <div class="stat-icon blue"><i class="fa-regular fa-file-lines"></i></div>
             <div class="stat-content">
@@ -317,7 +317,7 @@ $unreadCount = (int)$stmt->fetchColumn();
     </div>
 
     <!-- Charts Section -->
-    <div class="charts-grid">
+    <div class="charts-grid" id="charts">
         <!-- Bar Chart: Application Statuses -->
         <div class="chart-card">
             <div class="chart-header">

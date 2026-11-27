@@ -349,7 +349,7 @@ $progressPercent = $totalReqs > 0 ? round(($uploadedReqs / $totalReqs) * 100) : 
         </div>
     <?php endif; ?>
 
-    <section class="managed-forms">
+    <section class="managed-forms" id="forms">
         <h3>Application Forms</h3>
         <?php if ($availableForms): ?>
             <ul class="form-download-list">
@@ -473,7 +473,7 @@ $progressPercent = $totalReqs > 0 ? round(($uploadedReqs / $totalReqs) * 100) : 
             </div>
         </div>
 
-        <h3 style="font-family:var(--font-heading); font-size:1.25rem; color:var(--psu-navy); margin-bottom:8px;">Required Documents for Your Program</h3>
+        <h3 id="required-documents" style="font-family:var(--font-heading); font-size:1.25rem; color:var(--psu-navy); margin-bottom:8px;">Required Documents for Your Program</h3>
         <p style="color:var(--text-muted); font-size:0.95rem; margin-bottom:24px;">
             Please upload clear copies of the following documents (PDF, JPG, or PNG, max 5 MB each).
         </p>
