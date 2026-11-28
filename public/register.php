@@ -1,13 +1,16 @@
 <?php
 session_start();
 require_once __DIR__ . '/../config/db.php';
-$departmentOptions = require __DIR__ . '/../config/academic_departments.php';
+require_once __DIR__ . '/../config/participant_profile.php';
 
 $pdo = db();
 
 function e($value): string {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
+
+$campuses         = participantCampuses($pdo);
+$programsByCampus = participantProgramsByCampus($pdo);
 
 /* ==================================================================
  * STATE VARIABLES
@@ -19,181 +22,144 @@ $reg_first_name  = '';
 $reg_middle_name = '';
 $reg_last_name   = '';
 $reg_suffix      = '';
-$reg_email       = '';
 $reg_sex         = '';
 $reg_dob         = '';
-$reg_id_number   = ''; 
 
-$reg_account_type = 'Student'; 
-$reg_department   = '';
-$reg_program      = '';
-$reg_year_level   = '';
-$reg_faculty_rank = ''; 
-$reg_institution  = 'Pangasinan State University';
-$reg_term         = '';
+$reg_email       = '';   // institutional (primary) email
+$reg_alt_email   = '';   // optional personal email
 
-$reg_step = 1; 
+$reg_details = [
+    'account_type'   => 'student',
+    'campus_id'      => 0,
+    'program'        => '',
+    'student_number' => '',
+    'year_level'     => '',
+    'position_rank'  => '',
+];
+
+$reg_step = 1;
 
 /* ==================================================================
  * POST HANDLING
  * ================================================================== */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Step 1
-    $reg_first_name  = trim($_POST['first_name'] ?? '');
-    $reg_middle_name = trim($_POST['middle_name'] ?? '');
-    $reg_last_name   = trim($_POST['last_name'] ?? '');
-    $reg_suffix      = trim($_POST['suffix'] ?? '');
-    $reg_sex         = trim($_POST['sex'] ?? '');
-    $reg_dob         = trim($_POST['date_of_birth'] ?? '');
-    $reg_id_number   = trim($_POST['id_number'] ?? ''); 
+    $str = static fn(string $key): string => is_string($_POST[$key] ?? null) ? trim($_POST[$key]) : '';
 
-    // Step 2
-    $reg_email       = trim($_POST['email'] ?? '');
+    // Step 1 — personal
+    $reg_first_name  = $str('first_name');
+    $reg_middle_name = $str('middle_name');
+    $reg_last_name   = $str('last_name');
+    $reg_suffix      = $str('suffix');
+    $reg_sex         = $str('sex');
+    $reg_dob         = $str('date_of_birth');
 
-    // Step 3
-    $accountTypeInput = $_POST['account_type'] ?? 'Student';
-    $reg_account_type = is_string($accountTypeInput) ? trim($accountTypeInput) : '';
-    $reg_department  = trim($_POST['department'] ?? '');
+    // Step 2 — account
+    $reg_email       = strtolower($str('email'));
+    $reg_alt_email   = strtolower($str('alternate_email'));
 
-    if (!in_array($reg_account_type, ['Student', 'Faculty'], true)) {
-        $reg_errors[] = 'Please select a valid account type.';
-        $reg_account_type = 'Student';
-        $reg_step = 3;
-    }
-    
-    if ($reg_account_type === 'Student') {
-        $reg_program = trim($_POST['program'] ?? '');
-        $reg_year_level = trim($_POST['year_level'] ?? '');
-        $reg_faculty_rank = null;
-    } else {
-        $reg_faculty_rank = trim($_POST['faculty_rank'] ?? '');
-        $reg_program = null; 
-        $reg_year_level = null;
-    }
-    
-    $reg_institution = trim($_POST['institution'] ?? '');
-    $reg_term        = trim($_POST['term'] ?? '');
-
-    // Step 4
-    $password        = $_POST['password'] ?? '';
-    $confirm         = $_POST['confirm_password'] ?? '';
+    // Step 4 — security
+    $password        = is_string($_POST['password'] ?? null) ? $_POST['password'] : '';
+    $confirm         = is_string($_POST['confirm_password'] ?? null) ? $_POST['confirm_password'] : '';
     $agree_terms     = isset($_POST['agree_terms']);
 
-    $role = 'applicant';
-    $allowedSex = ['Male', 'Female', 'Prefer not to say'];
+    $firstErrorStep = 5;
+    $fail = static function (string $message, int $atStep) use (&$reg_errors, &$firstErrorStep): void {
+        $reg_errors[] = $message;
+        $firstErrorStep = min($firstErrorStep, $atStep);
+    };
 
-    // Validation logic
-    if ($reg_first_name === '' || $reg_last_name === '' || $reg_id_number === '') {
-        $reg_errors[] = 'Please fill in all required personal fields.';
-        $reg_step = 1;
+    /* ---- Step 1 ---- */
+    if ($reg_first_name === '' || $reg_last_name === '') {
+        $fail('Please enter your first and last name.', 1);
     }
-    if ($reg_sex === '' || !in_array($reg_sex, $allowedSex, true)) {
-        $reg_errors[] = 'Please select your sex.';
-        $reg_step = 1;
+    if (!in_array($reg_sex, ['Male', 'Female', 'Prefer not to say'], true)) {
+        $fail('Please select your sex.', 1);
     }
-
     $dobForDb = null;
-    if ($reg_dob !== '') {
+    if ($reg_dob === '') {
+        $fail('Please enter your date of birth.', 1);
+    } else {
         $d = DateTime::createFromFormat('Y-m-d', $reg_dob);
-        $valid = $d && $d->format('Y-m-d') === $reg_dob;
-        if (!$valid) {
-            $reg_errors[] = 'Please enter a valid date of birth.';
-            $reg_step = 1;
+        if (!$d || $d->format('Y-m-d') !== $reg_dob) {
+            $fail('Please enter a valid date of birth.', 1);
         } elseif ($d > new DateTime()) {
-            $reg_errors[] = 'Date of birth cannot be in the future.';
-            $reg_step = 1;
+            $fail('Date of birth cannot be in the future.', 1);
         } else {
             $dobForDb = $reg_dob;
         }
     }
 
+    /* ---- Step 2 ---- */
     if ($reg_email === '') {
-        $reg_errors[] = 'Please enter your email address.';
-        if ($reg_step === 1) $reg_step = 2;
+        $fail('Please enter your PSU institutional email address.', 2);
     } elseif (!filter_var($reg_email, FILTER_VALIDATE_EMAIL)) {
-        $reg_errors[] = 'Invalid email address.';
-        if ($reg_step === 1) $reg_step = 2;
+        $fail('Your institutional email address is not valid.', 2);
+    } elseif (!isInstitutionalEmail($reg_email)) {
+        $fail('Use your PSU institutional email (' . institutionalEmailHint() . ') as your primary email.', 2);
     }
-
-    if (!array_key_exists($reg_department, $departmentOptions)) {
-        $reg_errors[] = 'Please select a valid department.';
-        if ($reg_step <= 3) $reg_step = 3;
-    }
-    
-    if ($reg_account_type === 'Student') {
-        if ($reg_program === '' || $reg_year_level === '') {
-            $reg_errors[] = 'Please complete all student academic details.';
-            if ($reg_step <= 3) $reg_step = 3;
-        }
-    } else {
-        if ($reg_faculty_rank === '') {
-            $reg_errors[] = 'Please select your faculty rank.';
-            if ($reg_step <= 3) $reg_step = 3;
+    if ($reg_alt_email !== '') {
+        if (!filter_var($reg_alt_email, FILTER_VALIDATE_EMAIL)) {
+            $fail('Your alternative personal email address is not valid.', 2);
+        } elseif ($reg_alt_email === $reg_email) {
+            $fail('Your alternative email must be different from your institutional email.', 2);
         }
     }
 
+    /* ---- Step 3 ---- */
+    [$reg_details, $detailErrors] = validateParticipantDetails($_POST, $campuses, $programsByCampus);
+    foreach ($detailErrors as $message) {
+        $fail($message, 3);
+    }
+
+    /* ---- Step 4 ---- */
     if ($password === '' || $confirm === '') {
-        $reg_errors[] = 'Please create a password.';
-        if ($reg_step < 4) $reg_step = 4;
+        $fail('Please create a password.', 4);
+    } elseif (strlen($password) < 8) {
+        $fail('Password must be at least 8 characters long.', 4);
     } elseif ($password !== $confirm) {
-        $reg_errors[] = 'Passwords do not match.';
-        if ($reg_step < 4) $reg_step = 4;
+        $fail('Passwords do not match.', 4);
     }
     if (!$agree_terms) {
-        $reg_errors[] = 'You must agree to the Terms and Conditions.';
-        if ($reg_step < 4) $reg_step = 4;
+        $fail('You must agree to the Terms and Conditions.', 4);
     }
 
-    // Save to database
+    if ($reg_errors) {
+        $reg_step = $firstErrorStep;
+    }
+
+    /* ---- Save ---- */
     if (!$reg_errors) {
-        $check = $pdo->prepare("SELECT id FROM users WHERE email = :email");
-        $check->execute([':email' => $reg_email]);
+        $check = $pdo->prepare('SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1');
+        $check->execute([$reg_email]);
 
         if ($check->fetch()) {
-            $reg_errors[] = 'This email address is already registered.';
+            $reg_errors[] = 'This institutional email address is already registered.';
             $reg_step = 2;
         } else {
+            $columns = [
+                'first_name'      => $reg_first_name,
+                'middle_name'     => $reg_middle_name !== '' ? $reg_middle_name : null,
+                'last_name'       => $reg_last_name,
+                'suffix'          => $reg_suffix !== '' ? $reg_suffix : null,
+                'email'           => $reg_email,
+                'alternate_email' => $reg_alt_email !== '' ? $reg_alt_email : null,
+                'sex'             => $reg_sex,
+                'birthdate'       => $dobForDb,
+                'password_hash'   => password_hash($password, PASSWORD_DEFAULT),
+                'user_role'       => 'applicant',
+                'status'          => 'active',
+            ] + participantDetailColumns($reg_details);
+
             try {
-                $stmt = $pdo->prepare("
-                    INSERT INTO users (
-                        first_name, middle_name, last_name, suffix, email, department,
-                        program, year_level, faculty_rank,
-                        password_hash, sex, birthdate, student_id_number, user_role, account_type, status
-                    ) VALUES (
-                        :first_name, :middle_name, :last_name, :suffix, :email, :department,
-                        :program, :year_level, :faculty_rank,
-                        :password_hash, :sex, :birthdate, :id_number, :user_role, :account_type, :status
-                    )
-                ");
+                $names = array_keys($columns);
+                $sql = 'INSERT INTO users (' . implode(', ', $names) . ') VALUES (:' . implode(', :', $names) . ')';
+                $pdo->prepare($sql)->execute($columns);
 
-                $result = $stmt->execute([
-                    ':first_name'         => $reg_first_name,
-                    ':middle_name'        => $reg_middle_name !== '' ? $reg_middle_name : null,
-                    ':last_name'          => $reg_last_name,
-                    ':suffix'             => $reg_suffix !== '' ? $reg_suffix : null,
-                    ':email'              => $reg_email,
-                    ':department'         => $reg_department,
-                    ':program'            => $reg_program,
-                    ':year_level'         => $reg_year_level,
-                    ':faculty_rank'       => $reg_faculty_rank,
-                    ':password_hash'      => password_hash($password, PASSWORD_DEFAULT),
-                    ':sex'                => $reg_sex,
-                    ':birthdate'          => $dobForDb,
-                    ':id_number'          => $reg_id_number,
-                    ':user_role'          => $role,
-                    ':account_type'       => $reg_account_type,
-                    ':status'             => 'active',
-                ]);
-
-                if ($result) {
-                    $reg_success = true;
-                    header('refresh:2;url=user_login.php');
-                } else {
-                    $reg_errors[] = 'Registration failed. Please try again.';
-                }
-
+                $reg_success = true;
+                header('refresh:2;url=user_login.php');
             } catch (PDOException $ex) {
-                $reg_errors[] = 'Database error: ' . $ex->getMessage();
+                error_log('register.php insert failed: ' . $ex->getMessage());
+                $reg_errors[] = 'Registration failed. Please try again later.';
             }
         }
     }
@@ -679,6 +645,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: 0.8rem;
         }
 
+        .form-hint {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        select.form-input:disabled {
+            background-color: var(--bg-main);
+            color: var(--text-light);
+            cursor: not-allowed;
+        }
+
         .input-wrap {
             position: relative;
             display: flex;
@@ -934,7 +912,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
 
         <div class="hero-body">
-            <div class="eyebrow"><i></i> Student & Faculty Mobility Portal</div>
+            <div class="eyebrow"><i></i> Student, Faculty &amp; Staff Mobility Portal</div>
             <h2>Your journey to the <em>world</em> starts here.</h2>
             <p class="lead">Create your account to explore international exchange, study abroad, and global learning programs offered by Pangasinan State University.</p>
 
@@ -974,7 +952,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="line"><i></i></div>
                 <div class="st" data-s="2"><div class="dot"><span>2</span></div><div class="lbl">Account</div></div>
                 <div class="line"><i></i></div>
-                <div class="st" data-s="3"><div class="dot"><span>3</span></div><div class="lbl">Academic</div></div>
+                <div class="st" data-s="3"><div class="dot"><span>3</span></div><div class="lbl">PSU Details</div></div>
                 <div class="line"><i></i></div>
                 <div class="st" data-s="4"><div class="dot"><span>4</span></div><div class="lbl">Security</div></div>
             </div>
@@ -1019,18 +997,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     <div class="form-row">
                         <div class="form-group">
-                            <label class="form-label">Email Address *</label>
-                            <div class="input-wrap">
-                                <svg class="lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>
-                                <input class="form-input" type="email" name="email" placeholder="Enter your email address" required value="<?= e($reg_email) ?>">
-                            </div>
+                            <label class="form-label">Middle Name <span class="opt">(Optional)</span></label>
+                            <input class="form-input no-ic" type="text" name="middle_name" maxlength="100" placeholder="Enter your middle name" value="<?= e($reg_middle_name) ?>">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Student ID <span class="opt">(Optional)</span></label>
-                            <div class="input-wrap">
-                                <svg class="lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M15 9h3M15 13h3M6 17c.5-2 2-3 3-3s2.5 1 3 3"/></svg>
-                                <input class="form-input" type="text" name="id_number" placeholder="Enter your student ID" value="<?= e($reg_id_number) ?>">
-                            </div>
+                            <label class="form-label">Suffix <span class="opt">(Optional)</span></label>
+                            <input class="form-input no-ic" type="text" name="suffix" maxlength="20" placeholder="e.g. Jr., III" value="<?= e($reg_suffix) ?>">
                         </div>
                     </div>
 
@@ -1064,11 +1036,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <!-- STEP 2: ACCOUNT INFO -->
                 <div class="form-step <?= ($reg_step === 2) ? 'active' : '' ?>" id="step-2">
                     <div class="form-group">
-                        <label class="form-label">PSU Email Address *</label>
+                        <label class="form-label" for="reg_email">PSU Institutional Email *</label>
                         <div class="input-wrap">
                             <svg class="lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>
-                            <input class="form-input" type="email" name="email" placeholder="juan.delacruz@psu.edu.ph" required value="<?= e($reg_email) ?>">
+                            <input class="form-input" type="email" name="email" id="reg_email" placeholder="juan.delacruz@psu.edu.ph" required autocomplete="email" maxlength="150" value="<?= e($reg_email) ?>">
                         </div>
+                        <small class="form-hint">Your primary email for signing in and receiving updates. Must end in <?= e(institutionalEmailHint()) ?>.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="reg_alt_email">Alternative Personal Email <span class="opt">(Optional)</span></label>
+                        <div class="input-wrap">
+                            <svg class="lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>
+                            <input class="form-input" type="email" name="alternate_email" id="reg_alt_email" placeholder="you@gmail.com" maxlength="150" value="<?= e($reg_alt_email) ?>">
+                        </div>
+                        <small class="form-hint">A backup contact if your school email becomes unavailable.</small>
                     </div>
 
                     <div class="form-actions">
@@ -1077,85 +1059,89 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                 </div>
 
-                <!-- STEP 3: ACADEMIC DETAILS -->
+                <!-- STEP 3: PSU AFFILIATION -->
+                <?php
+                    $acct = $reg_details['account_type'];
+                    $selCampus = (int)$reg_details['campus_id'];
+                    $campusProgramList = $programsByCampus[$selCampus] ?? [];
+                ?>
                 <div class="form-step <?= ($reg_step === 3) ? 'active' : '' ?>" id="step-3">
                     <div class="form-group">
-                        <label class="form-label">I am a... *</label>
-                        <div class="radio-group">
-                            <label class="radio-pill"><input type="radio" name="account_type" value="Student" <?= $reg_account_type === 'Student' ? 'checked' : '' ?> onclick="toggleAccountType('Student')" required><span>Student</span></label>
-                            <label class="radio-pill"><input type="radio" name="account_type" value="Faculty" <?= $reg_account_type === 'Faculty' ? 'checked' : '' ?> onclick="toggleAccountType('Faculty')"><span>Faculty</span></label>
+                        <span class="form-label" id="classification-label">I am a PSU... *</span>
+                        <div class="radio-group" role="radiogroup" aria-labelledby="classification-label">
+                            <?php foreach (PARTICIPANT_CLASSIFICATIONS as $value => $label): ?>
+                                <label class="radio-pill"><input type="radio" name="account_type" value="<?= e($value) ?>" <?= $acct === $value ? 'checked' : '' ?> required><span><?= e($label) ?></span></label>
+                            <?php endforeach; ?>
                         </div>
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">Institution *</label>
+                        <label class="form-label" for="campus_id">Campus *</label>
                         <div class="input-wrap">
                             <svg class="lead-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10l7-5 7 5v11M9 21v-6h6v6"/></svg>
-                            <select class="form-input" name="institution" required>
-                                <option value="Pangasinan State University" <?= $reg_institution === 'Pangasinan State University' ? 'selected' : '' ?>>Pangasinan State University</option>
-                                <option value="Other" <?= $reg_institution === 'Other' ? 'selected' : '' ?>>Other</option>
+                            <select class="form-input" name="campus_id" id="campus_id" required>
+                                <option value="">Select your campus</option>
+                                <?php foreach ($campuses as $id => $name): ?>
+                                    <option value="<?= (int)$id ?>" <?= $selCampus === $id ? 'selected' : '' ?>><?= e($name) ?></option>
+                                <?php endforeach; ?>
                             </select>
                         </div>
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">Department *</label>
-                        <select class="form-input no-ic" name="department" required>
-                            <option value="">Select</option>
-                            <?php foreach ($departmentOptions as $department => $label): ?>
-                                <option value="<?= e($department) ?>" <?= $reg_department === $department ? 'selected' : '' ?>><?= e($label) ?></option>
-                            <?php endforeach; ?>
+                        <label class="form-label" for="program">
+                            <span id="program-label-text"><?= $acct === 'student' ? 'Degree Program' : 'Department / Program' ?></span>
+                            <span id="program-req"><?= $acct === 'non-teaching' ? '<span class="opt">(Optional)</span>' : '*' ?></span>
+                        </label>
+                        <select class="form-input no-ic" name="program" id="program" <?= $selCampus ? '' : 'disabled' ?> <?= $acct === 'non-teaching' ? '' : 'required' ?>>
+                            <?php if (!$selCampus): ?>
+                                <option value="">Select a campus first</option>
+                            <?php else: ?>
+                                <option value=""><?= $campusProgramList ? 'Select' : 'No programs listed for this campus' ?></option>
+                                <?php foreach ($campusProgramList as $prog): ?>
+                                    <option value="<?= e($prog) ?>" <?= $reg_details['program'] === $prog ? 'selected' : '' ?>><?= e($prog) ?></option>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
                         </select>
                     </div>
 
                     <!-- STUDENT FIELDS -->
-                    <div id="student-fields" style="display: <?= $reg_account_type === 'Student' ? 'block' : 'none' ?>;">
+                    <div class="type-fields" data-type="student" <?= $acct === 'student' ? '' : 'hidden' ?>>
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">Program *</label>
-                                <select class="form-input no-ic" name="program" id="student_program">
-                                    <option value="">Select</option>
-                                    <option value="BS Information Technology" <?= $reg_program === 'BS Information Technology' ? 'selected' : '' ?>>BS IT</option>
-                                    <option value="BS Computer Science" <?= $reg_program === 'BS Computer Science' ? 'selected' : '' ?>>BS CS</option>
-                                    <option value="BS Civil Engineering" <?= $reg_program === 'BS Civil Engineering' ? 'selected' : '' ?>>BS CE</option>
-                                    <option value="BS Accountancy" <?= $reg_program === 'BS Accountancy' ? 'selected' : '' ?>>BS Accountancy</option>
-                                    <option value="Bachelor of Elementary Education" <?= $reg_program === 'Bachelor of Elementary Education' ? 'selected' : '' ?>>BEEd</option>
-                                </select>
+                                <label class="form-label" for="student_number">Student Number *</label>
+                                <input class="form-input no-ic" type="text" name="student_number" id="student_number" maxlength="30" placeholder="e.g. 21-UR-0123" value="<?= e($reg_details['student_number']) ?>">
                             </div>
                             <div class="form-group">
-                                <label class="form-label">Year Level *</label>
-                                <select class="form-input no-ic" name="year_level" id="student_year">
+                                <label class="form-label" for="year_level">Year Level *</label>
+                                <select class="form-input no-ic" name="year_level" id="year_level">
                                     <option value="">Select</option>
-                                    <option value="1st Year" <?= $reg_year_level === '1st Year' ? 'selected' : '' ?>>1st Year</option>
-                                    <option value="2nd Year" <?= $reg_year_level === '2nd Year' ? 'selected' : '' ?>>2nd Year</option>
-                                    <option value="3rd Year" <?= $reg_year_level === '3rd Year' ? 'selected' : '' ?>>3rd Year</option>
-                                    <option value="4th Year" <?= $reg_year_level === '4th Year' ? 'selected' : '' ?>>4th Year</option>
-                                    <option value="5th Year" <?= $reg_year_level === '5th Year' ? 'selected' : '' ?>>5th Year</option>
+                                    <?php foreach (PARTICIPANT_YEAR_LEVELS as $yl): ?>
+                                        <option value="<?= e($yl) ?>" <?= $reg_details['year_level'] === $yl ? 'selected' : '' ?>><?= e($yl) ?></option>
+                                    <?php endforeach; ?>
                                 </select>
                             </div>
                         </div>
                     </div>
 
                     <!-- FACULTY FIELDS -->
-                    <div id="faculty-fields" style="display: <?= $reg_account_type === 'Faculty' ? 'block' : 'none' ?>;">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="form-label">Faculty Rank *</label>
-                                <select class="form-input no-ic" name="faculty_rank" id="faculty_rank">
-                                    <option value="">Select</option>
-                                    <option value="Instructor" <?= $reg_faculty_rank === 'Instructor' ? 'selected' : '' ?>>Instructor</option>
-                                    <option value="Assistant Professor" <?= $reg_faculty_rank === 'Assistant Professor' ? 'selected' : '' ?>>Assistant Professor</option>
-                                    <option value="Associate Professor" <?= $reg_faculty_rank === 'Associate Professor' ? 'selected' : '' ?>>Associate Professor</option>
-                                    <option value="Professor" <?= $reg_faculty_rank === 'Professor' ? 'selected' : '' ?>>Professor</option>
-                                </select>
-                            </div>
+                    <div class="type-fields" data-type="faculty" <?= $acct === 'faculty' ? '' : 'hidden' ?>>
+                        <div class="form-group">
+                            <label class="form-label" for="faculty_rank">Academic Rank *</label>
+                            <select class="form-input no-ic" name="faculty_rank" id="faculty_rank">
+                                <option value="">Select</option>
+                                <?php foreach (PARTICIPANT_FACULTY_RANKS as $rank): ?>
+                                    <option value="<?= e($rank) ?>" <?= ($acct === 'faculty' && $reg_details['position_rank'] === $rank) ? 'selected' : '' ?>><?= e($rank) ?></option>
+                                <?php endforeach; ?>
+                            </select>
                         </div>
                     </div>
 
-                    <div class="form-row">
+                    <!-- NON-TEACHING FIELDS -->
+                    <div class="type-fields" data-type="non-teaching" <?= $acct === 'non-teaching' ? '' : 'hidden' ?>>
                         <div class="form-group">
-                            <label class="form-label">Term <span class="opt">(Optional)</span></label>
-                            <input class="form-input no-ic" type="text" name="term" placeholder="1st Sem 2024" value="<?= e($reg_term) ?>">
+                            <label class="form-label" for="position">Position / Designation *</label>
+                            <input class="form-input no-ic" type="text" name="position" id="position" maxlength="120" placeholder="e.g. Administrative Officer II" value="<?= e($acct === 'non-teaching' ? $reg_details['position_rank'] : '') ?>">
                         </div>
                     </div>
 
@@ -1271,30 +1257,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     document.addEventListener('DOMContentLoaded', () => updateStepper(<?= (int)$reg_step ?>));
     
-    function toggleAccountType(type) {
-        const studentFields = document.getElementById('student-fields');
-        const facultyFields = document.getElementById('faculty-fields');
-        
-        const progSelect = document.getElementById('student_program');
-        const yearSelect = document.getElementById('student_year');
-        const rankSelect = document.getElementById('faculty_rank');
+    /* ---------- PSU affiliation: classification + campus → program ---------- */
+    const PROGRAMS_BY_CAMPUS = <?= json_encode((object)$programsByCampus, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+    const PSU_DOMAINS = <?= json_encode(PSU_EMAIL_DOMAINS) ?>;
+    const TYPE_REQUIRED = {
+        'student':      ['student_number', 'year_level'],
+        'faculty':      ['faculty_rank'],
+        'non-teaching': ['position'],
+    };
 
-        if (type === 'Student') {
-            studentFields.style.display = 'block';
-            facultyFields.style.display = 'none';
-            
-            progSelect.required = true;
-            yearSelect.required = true;
-            rankSelect.required = false;
-        } else {
-            studentFields.style.display = 'none';
-            facultyFields.style.display = 'block';
-            
-            progSelect.required = false;
-            yearSelect.required = false;
-            rankSelect.required = true;
-        }
+    const campusSelect  = document.getElementById('campus_id');
+    const programSelect = document.getElementById('program');
+
+    function selectedType() {
+        const checked = document.querySelector('input[name="account_type"]:checked');
+        return checked ? checked.value : 'student';
     }
+
+    function applyAccountType() {
+        const type = selectedType();
+        document.querySelectorAll('.type-fields').forEach(block => {
+            const active = block.dataset.type === type;
+            block.hidden = !active;
+            block.querySelectorAll('input, select').forEach(el => {
+                el.disabled = !active;   // inactive fields are not submitted
+                el.required = active && TYPE_REQUIRED[type].includes(el.id);
+            });
+        });
+        const optional = type === 'non-teaching';
+        programSelect.required = !optional && !programSelect.disabled;
+        document.getElementById('program-label-text').textContent = type === 'student' ? 'Degree Program' : 'Department / Program';
+        document.getElementById('program-req').innerHTML = optional ? '<span class="opt">(Optional)</span>' : '*';
+    }
+
+    function populatePrograms() {
+        const previous = programSelect.value;
+        const list = PROGRAMS_BY_CAMPUS[campusSelect.value] || [];
+        programSelect.innerHTML = '';
+        const placeholder = new Option(
+            !campusSelect.value ? 'Select a campus first' : (list.length ? 'Select' : 'No programs listed for this campus'), '');
+        programSelect.add(placeholder);
+        list.forEach(name => programSelect.add(new Option(name, name, false, name === previous)));
+        programSelect.disabled = !campusSelect.value;
+        applyAccountType();
+    }
+
+    campusSelect.addEventListener('change', populatePrograms);
+    document.querySelectorAll('input[name="account_type"]').forEach(r => r.addEventListener('change', applyAccountType));
+    applyAccountType();
+
+    /* ---------- Email checks (server re-validates) ---------- */
+    const emailInput = document.getElementById('reg_email');
+    const altInput   = document.getElementById('reg_alt_email');
+
+    function isInstitutional(email) {
+        const domain = (email.split('@')[1] || '').toLowerCase();
+        return PSU_DOMAINS.some(d => domain === d || domain.endsWith('.' + d));
+    }
+
+    function checkEmails() {
+        const primary = emailInput.value.trim();
+        emailInput.setCustomValidity(primary && !isInstitutional(primary)
+            ? 'Use your PSU institutional email (@' + PSU_DOMAINS.join(' or @') + ').' : '');
+        const alt = altInput.value.trim();
+        altInput.setCustomValidity(alt && alt.toLowerCase() === primary.toLowerCase()
+            ? 'Your alternative email must be different from your institutional email.' : '');
+    }
+    emailInput.addEventListener('input', checkEmails);
+    altInput.addEventListener('input', checkEmails);
+    checkEmails();
+
+    /* ---------- Password length ---------- */
+    const pwInput = document.getElementById('pw');
+    pwInput.minLength = 8;
 </script>
 
 </body>
