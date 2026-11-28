@@ -4,7 +4,9 @@ if (!isset($pdo, $userId, $user) || !($pdo instanceof PDO)) {
     exit;
 }
 
-$departmentOptions = require __DIR__ . '/../config/academic_departments.php';
+require_once __DIR__ . '/../config/participant_profile.php';
+$campuses         = participantCampuses($pdo);
+$programsByCampus = participantProgramsByCampus($pdo);
 $activeTab = $_GET['tab'] ?? 'profile'; // profile, security, danger
 
 $saved = false;
@@ -29,29 +31,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $contact   = is_string($_POST['contact'] ?? null) ? trim($_POST['contact']) : '';
             $birthdate = is_string($_POST['birthdate'] ?? null) ? trim($_POST['birthdate']) : '';
             $sex       = is_string($_POST['sex'] ?? null) ? $_POST['sex'] : '';
-            $department = is_string($_POST['department'] ?? null) ? $_POST['department'] : '';
+            $altEmail  = is_string($_POST['alternate_email'] ?? null) ? strtolower(trim($_POST['alternate_email'])) : '';
 
             if ($first === '') $errors[] = 'First name is required.';
             if ($last === '')  $errors[] = 'Last name is required.';
             if (mb_strlen($first) > 100 || mb_strlen($middle) > 100 || mb_strlen($last) > 100) {
                 $errors[] = 'Names must be 100 characters or fewer.';
             }
-            if (!array_key_exists($department, $departmentOptions)) {
-                $errors[] = 'Select a valid department.';
+            if (!in_array($sex, ['', 'Male', 'Female', 'Prefer not to say'], true)) {
+                $errors[] = 'Select a valid option for sex.';
+            }
+            if ($altEmail !== '') {
+                if (!filter_var($altEmail, FILTER_VALIDATE_EMAIL) || mb_strlen($altEmail) > 150) {
+                    $errors[] = 'Enter a valid alternative personal email.';
+                } elseif ($altEmail === strtolower((string)($user['email'] ?? ''))) {
+                    $errors[] = 'Your alternative email must be different from your institutional email.';
+                }
             }
 
+            [$details, $detailErrors] = validateParticipantDetails($_POST, $campuses, $programsByCampus);
+            $errors = array_merge($errors, $detailErrors);
+
             if (!$errors) {
-                $stmt = $pdo->prepare("
-                    UPDATE users
-                    SET first_name = ?, middle_name = ?, last_name = ?, suffix = ?,
-                        contact = ?, birthdate = ?, sex = ?, department = ?
-                    WHERE id = ?
-                ");
-                $stmt->execute([
-                    $first, $middle !== '' ? $middle : null, $last, $suffix !== '' ? $suffix : null,
-                    $contact !== '' ? $contact : null, $birthdate !== '' ? $birthdate : null, 
-                    $sex !== '' ? $sex : null, $department, $userId,
-                ]);
+                $columns = [
+                    'first_name'      => $first,
+                    'middle_name'     => $middle !== '' ? $middle : null,
+                    'last_name'       => $last,
+                    'suffix'          => $suffix !== '' ? $suffix : null,
+                    'contact'         => $contact !== '' ? $contact : null,
+                    'birthdate'       => $birthdate !== '' ? $birthdate : null,
+                    'sex'             => $sex !== '' ? $sex : null,
+                    'alternate_email' => $altEmail !== '' ? $altEmail : null,
+                ] + participantDetailColumns($details);
+
+                $set = implode(', ', array_map(static fn($c) => "$c = :$c", array_keys($columns)));
+                $stmt = $pdo->prepare("UPDATE users SET $set WHERE id = :id");
+                $stmt->execute($columns + ['id' => $userId]);
 
                 $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ?');
                 $stmt->execute([$userId]);
@@ -119,6 +134,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 }
+
+/* Affiliation values shown in the form: what the user just submitted if the save failed, else what is stored. */
+if (isset($details) && $errors) {
+    $pv = $details;
+    $pv['alternate_email'] = $altEmail ?? '';
+} else {
+    $storedType = strtolower((string)($user['account_type'] ?? 'student'));
+    $pv = [
+        'account_type'    => array_key_exists($storedType, PARTICIPANT_CLASSIFICATIONS) ? $storedType : 'student',
+        'campus_id'       => (int)($user['campus_id'] ?? 0),
+        'program'         => (string)($user['program'] ?? ''),
+        'student_number'  => (string)($user['student_id_number'] ?? ''),
+        'year_level'      => (string)($user['year_level'] ?? ''),
+        'position_rank'   => (string)($user['faculty_rank'] ?? ''),
+        'alternate_email' => (string)($user['alternate_email'] ?? ''),
+    ];
+}
+$pvPrograms = $programsByCampus[$pv['campus_id']] ?? [];
 
 $fullName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''));
 $initials = strtoupper(substr($user['first_name'] ?? 'A', 0, 1) . substr($user['last_name'] ?? '', 0, 1));
@@ -221,7 +254,26 @@ if (isset($pdo, $userId)) {
         gap: 8px;
     }
     .profile-form-group.full-width { grid-column: span 2; }
-    
+    .profile-form-group[hidden] { display: none; }
+    .profile-section-title {
+        font-size: 1rem;
+        font-weight: 800;
+        color: var(--psu-navy);
+        margin: 8px 0 0;
+        padding-top: 20px;
+        border-top: 1px solid var(--border-light);
+    }
+    .profile-section-note {
+        margin: 0;
+        font-size: 0.85rem;
+        color: #92400e;
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+        border-radius: 8px;
+        padding: 10px 14px;
+    }
+    .profile-form-group select:disabled { opacity: 0.6; cursor: not-allowed; }
+
     .profile-form-group label { 
         font-size: 0.85rem; 
         font-weight: 700; 
@@ -462,17 +514,13 @@ if (isset($pdo, $userId)) {
                 </div>
             </div>
             <div class="profile-form-group">
-                <label>Department *</label>
+                <label for="pf_alt_email">Alternative Personal Email</label>
                 <div class="input-wrapper">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10l7-5 7 5v11M9 21v-6h6v6"/></svg>
-                    <select name="department" required>
-                        <option value="">Select department</option>
-                        <?php foreach ($departmentOptions as $department => $label): ?>
-                            <option value="<?= h($department) ?>" <?= ($user['department'] ?? '') === $department ? 'selected' : '' ?>><?= h($label) ?></option>
-                        <?php endforeach; ?>
-                    </select>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>
+                    <input type="email" name="alternate_email" id="pf_alt_email" maxlength="150" value="<?= h($pv['alternate_email']) ?>" placeholder="Optional backup email">
                 </div>
             </div>
+
             <div class="profile-form-group">
                 <label>Contact Number</label>
                 <div class="input-wrapper">
@@ -499,11 +547,140 @@ if (isset($pdo, $userId)) {
                     </select>
                 </div>
             </div>
+            <div class="profile-form-group full-width">
+                <h3 class="profile-section-title">PSU Affiliation</h3>
+                <?php if (!$pv['campus_id'] || ($pv['account_type'] !== 'non-teaching' && !in_array($pv['program'], $pvPrograms, true))): ?>
+                    <p class="profile-section-note">Please select your campus and department / program — they decide which mobility programs you can apply for.</p>
+                <?php endif; ?>
+            </div>
+
+            <div class="profile-form-group">
+                <label for="pf_account_type">Classification *</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <select name="account_type" id="pf_account_type" required>
+                        <?php foreach (PARTICIPANT_CLASSIFICATIONS as $value => $label): ?>
+                            <option value="<?= h($value) ?>" <?= $pv['account_type'] === $value ? 'selected' : '' ?>><?= h($label) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+            <div class="profile-form-group">
+                <label for="pf_campus">Campus *</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10l7-5 7 5v11M9 21v-6h6v6"/></svg>
+                    <select name="campus_id" id="pf_campus" required>
+                        <option value="">Select your campus</option>
+                        <?php foreach ($campuses as $id => $name): ?>
+                            <option value="<?= (int)$id ?>" <?= $pv['campus_id'] === $id ? 'selected' : '' ?>><?= h($name) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+            <div class="profile-form-group full-width">
+                <label for="pf_program"><span id="pf_program_label"><?= $pv['account_type'] === 'student' ? 'Degree Program' : 'Department / Program' ?></span> <span id="pf_program_req"><?= $pv['account_type'] === 'non-teaching' ? '(optional)' : '*' ?></span></label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10L12 5 2 10l10 5 10-5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+                    <select name="program" id="pf_program" <?= $pv['campus_id'] ? '' : 'disabled' ?>>
+                        <?php if (!$pv['campus_id']): ?>
+                            <option value="">Select a campus first</option>
+                        <?php else: ?>
+                            <option value=""><?= $pvPrograms ? 'Select' : 'No programs listed for this campus' ?></option>
+                            <?php foreach ($pvPrograms as $prog): ?>
+                                <option value="<?= h($prog) ?>" <?= $pv['program'] === $prog ? 'selected' : '' ?>><?= h($prog) ?></option>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Student -->
+            <div class="profile-form-group pf-type" data-type="student" <?= $pv['account_type'] === 'student' ? '' : 'hidden' ?>>
+                <label for="student_number">Student Number *</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M15 9h3M15 13h3M6 17c.5-2 2-3 3-3s2.5 1 3 3"/></svg>
+                    <input type="text" name="student_number" id="student_number" maxlength="30" value="<?= h($pv['student_number']) ?>">
+                </div>
+            </div>
+            <div class="profile-form-group pf-type" data-type="student" <?= $pv['account_type'] === 'student' ? '' : 'hidden' ?>>
+                <label for="year_level">Year Level *</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16M4 15h16M4 11h16"/></svg>
+                    <select name="year_level" id="year_level">
+                        <option value="">Select</option>
+                        <?php foreach (PARTICIPANT_YEAR_LEVELS as $yl): ?>
+                            <option value="<?= h($yl) ?>" <?= $pv['year_level'] === $yl ? 'selected' : '' ?>><?= h($yl) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Faculty -->
+            <div class="profile-form-group pf-type" data-type="faculty" <?= $pv['account_type'] === 'faculty' ? '' : 'hidden' ?>>
+                <label for="faculty_rank">Academic Rank *</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                    <select name="faculty_rank" id="faculty_rank">
+                        <option value="">Select</option>
+                        <?php foreach (PARTICIPANT_FACULTY_RANKS as $rank): ?>
+                            <option value="<?= h($rank) ?>" <?= ($pv['account_type'] === 'faculty' && $pv['position_rank'] === $rank) ? 'selected' : '' ?>><?= h($rank) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Non-teaching -->
+            <div class="profile-form-group pf-type" data-type="non-teaching" <?= $pv['account_type'] === 'non-teaching' ? '' : 'hidden' ?>>
+                <label for="position">Position / Designation *</label>
+                <div class="input-wrapper">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                    <input type="text" name="position" id="position" maxlength="120" value="<?= h($pv['account_type'] === 'non-teaching' ? $pv['position_rank'] : '') ?>" placeholder="e.g. Administrative Officer II">
+                </div>
+            </div>
         </div>
         <button type="submit" class="btn-save">
             <i class="fa-solid fa-floppy-disk"></i> Save Changes
         </button>
     </form>
+    <script>
+    (function () {
+        const PROGRAMS_BY_CAMPUS = <?= json_encode((object)$programsByCampus, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+        const TYPE_REQUIRED = { 'student': ['student_number', 'year_level'], 'faculty': ['faculty_rank'], 'non-teaching': ['position'] };
+        const typeSelect = document.getElementById('pf_account_type');
+        const campus = document.getElementById('pf_campus');
+        const program = document.getElementById('pf_program');
+
+        function applyType() {
+            const type = typeSelect.value;
+            document.querySelectorAll('.pf-type').forEach(group => {
+                const active = group.dataset.type === type;
+                group.hidden = !active;
+                group.querySelectorAll('input, select').forEach(el => {
+                    el.disabled = !active;
+                    el.required = active && TYPE_REQUIRED[type].includes(el.id);
+                });
+            });
+            const optional = type === 'non-teaching';
+            program.required = !optional && !program.disabled;
+            document.getElementById('pf_program_label').textContent = type === 'student' ? 'Degree Program' : 'Department / Program';
+            document.getElementById('pf_program_req').textContent = optional ? '(optional)' : '*';
+        }
+
+        function populatePrograms() {
+            const previous = program.value;
+            const list = PROGRAMS_BY_CAMPUS[campus.value] || [];
+            program.innerHTML = '';
+            program.add(new Option(!campus.value ? 'Select a campus first' : (list.length ? 'Select' : 'No programs listed for this campus'), ''));
+            list.forEach(name => program.add(new Option(name, name, false, name === previous)));
+            program.disabled = !campus.value;
+            applyType();
+        }
+
+        typeSelect.addEventListener('change', applyType);
+        campus.addEventListener('change', populatePrograms);
+        applyType();
+    })();
+    </script>
     <?php endif; ?>
 
     <!-- ==========================================
