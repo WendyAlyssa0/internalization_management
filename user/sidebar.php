@@ -10,6 +10,7 @@ $pageSections = [
     'forms_requirements'    => $sectionsDocs,
     'program_detail'        => [['program-description', 'Description'], ['program-requirements', 'Requirements']],
     'my_application_detail' => [['application-details', 'Details'], ['application-requirements', 'Requirements']],
+    'travel_information'    => [['mobility-progress', 'Progress'], ['mobility-info', 'Mobility Info'], ['travel-info', 'Travel'], ['passport', 'Passport'], ['travel-documents', 'Documents']],
 ];
 
 /* aria-current: "page" on the exact page, "true" when a related sub-page is open. */
@@ -37,6 +38,7 @@ $gHome      = ['home'];
 $gPrograms  = ['available_programs', 'program_detail'];
 $gApps      = ['my_applications', 'application_status', 'my_application_detail'];
 $gDocs      = ['documents', 'forms_requirements'];
+$gTravel    = ['travel_information'];
 ?>
 <aside class="sidebar" id="mainSidebar">
     <div class="brand">
@@ -68,6 +70,10 @@ $gDocs      = ['documents', 'forms_requirements'];
         <a href="?page=mobility_schedule" class="nav-link <?= $currentPage === 'mobility_schedule' ? 'active' : '' ?>"<?= $ariaCurrent(['mobility_schedule']) ?>>
             <i class="fa-regular fa-calendar-days"></i> <span>Mobility Schedule</span>
         </a>
+        <a href="?page=travel_information" class="nav-link <?= $currentPage === 'travel_information' ? 'active' : '' ?>"<?= $ariaCurrent($gTravel) ?>>
+            <i class="fa-solid fa-plane-departure"></i> <span>Mobility &amp; Travel</span>
+        </a>
+        <?php $renderSubnav($gTravel); ?>
         <a href="?page=notifications" class="nav-link <?= $currentPage === 'notifications' ? 'active' : '' ?>"<?= $ariaCurrent(['notifications']) ?>>
             <i class="fa-regular fa-bell"></i> <span>Notifications</span>
             <?php if (!empty($unreadCount)): ?><em><?= (int)$unreadCount ?></em><?php endif; ?>

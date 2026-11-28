@@ -38,6 +38,7 @@ $routes = [
     'forms_requirements'    => 'documents.php',
     'partner_directory'     => 'partner_directory.php',
     'mobility_schedule'     => 'mobility_schedule.php',
+    'travel_information'    => 'travel_information.php',
     'notifications'         => 'notifications.php',
     'profile'               => 'profile.php',
     'settings'              => 'profile.php',
