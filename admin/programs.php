@@ -697,135 +697,155 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <input type="hidden" name="id" id="edit_id">
 
             <div class="modal-body">
-                <div class="form-group">
-                    <label for="edit_program_name">Program Name</label>
-                    <input type="text" name="program_name" id="edit_program_name" class="form-input" required>
-                </div>
+                <div class="modal-section">
+                    <p class="modal-section-title">Basic Information</p>
 
-                <div class="form-row">
                     <div class="form-group">
-                        <label for="edit_eligible_campuses">Eligible Campuses</label>
-                        <select name="eligible_campuses[]" id="edit_eligible_campuses" class="form-input" multiple required>
-                            <?php foreach ($campusOptions as $campus): ?>
-                                <option value="<?= (int)$campus['id'] ?>"><?= h($campus['campus_name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <small class="form-hint">Hold Ctrl (or Cmd) to select more than one.</small>
+                        <label for="edit_program_name">Program Name</label>
+                        <input type="text" name="program_name" id="edit_program_name" class="form-input" required>
                     </div>
-                    <div class="form-group">
-                        <label for="edit_eligible_degree_programs">Eligible Degree Programs</label>
-                        <select name="eligible_degree_programs[]" id="edit_eligible_degree_programs" class="form-input" multiple required>
-                            <?php foreach ($degreeProgramOptions as $degree): ?>
-                                <option value="<?= (int)$degree['id'] ?>" data-campus="<?= (int)$degree['campus_id'] ?>"><?= h($degree['program_name'] . ' — ' . $degree['campus_name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <small class="form-hint">Shows degree programs of the selected campuses. <a href="degree_programs.php">Manage degree programs</a></small>
-                    </div>
-                </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="edit_program_types">Program Types</label>
-                        <select name="program_types[]" id="edit_program_types" class="form-input" multiple required>
-                            <?php foreach ($programTypes as $type): ?>
-                                <option value="<?= h($type['category_name']) ?>"><?= h($type['category_name']) ?></option>
-                            <?php endforeach; ?>
-                            <option value="Others">Others</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="edit_other_program_type">Other program type (when Others is selected)</label>
-                        <input type="text" name="other_program_type" id="edit_other_program_type" class="form-input" maxlength="100">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="edit_program_types">Program Types</label>
+                            <select name="program_types[]" id="edit_program_types" class="form-input" multiple required>
+                                <?php foreach ($programTypes as $type): ?>
+                                    <option value="<?= h($type['category_name']) ?>"><?= h($type['category_name']) ?></option>
+                                <?php endforeach; ?>
+                                <option value="Others">Others</option>
+                            </select>
+                            <small class="form-hint">Hold Ctrl (or Cmd) to select more than one.</small>
+                        </div>
+                        <div class="form-group other-type-group is-hidden" id="edit_other_type_group">
+                            <label for="edit_other_program_type">Custom Program Type</label>
+                            <input type="text" name="other_program_type" id="edit_other_program_type" class="form-input" maxlength="100" placeholder="Enter the custom type...">
+                            <small class="form-hint">Shown when "Others" is selected.</small>
+                        </div>
                     </div>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Eligible Participants</label>
-                        <fieldset id="edit_participant_types">
-                            <label><input type="checkbox" name="eligible_participant_types[]" value="student"> Student</label>
-                            <label><input type="checkbox" name="eligible_participant_types[]" value="faculty"> Faculty</label>
-                            <label><input type="checkbox" name="eligible_participant_types[]" value="non-teaching"> Non-teaching</label>
-                        </fieldset>
+                <div class="modal-section">
+                    <p class="modal-section-title">Eligibility</p>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="edit_eligible_campuses">Eligible Campuses</label>
+                            <select name="eligible_campuses[]" id="edit_eligible_campuses" class="form-input" multiple required>
+                                <?php foreach ($campusOptions as $campus): ?>
+                                    <option value="<?= (int)$campus['id'] ?>"><?= h($campus['campus_name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="form-hint">Hold Ctrl (or Cmd) to select more than one.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_eligible_degree_programs">Eligible Degree Programs</label>
+                            <select name="eligible_degree_programs[]" id="edit_eligible_degree_programs" class="form-input" multiple required>
+                                <?php foreach ($degreeProgramOptions as $degree): ?>
+                                    <option value="<?= (int)$degree['id'] ?>" data-campus="<?= (int)$degree['campus_id'] ?>"><?= h($degree['program_name'] . ' — ' . $degree['campus_name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="form-hint">Shows degree programs of the selected campuses. <a href="degree_programs.php">Manage degree programs</a></small>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="edit_status">Status</label>
-                        <select name="status" id="edit_status" class="form-input" required>
-                            <option value="Active">Active</option>
-                            <option value="Upcoming">Upcoming</option>
-                            <option value="Completed">Completed</option>
-                            <option value="Suspended">Suspended</option>
-                        </select>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Eligible Participants</label>
+                            <fieldset id="edit_participant_types">
+                                <label><input type="checkbox" name="eligible_participant_types[]" value="student"> Student</label>
+                                <label><input type="checkbox" name="eligible_participant_types[]" value="faculty"> Faculty</label>
+                                <label><input type="checkbox" name="eligible_participant_types[]" value="non-teaching"> Non-teaching</label>
+                            </fieldset>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_status">Status</label>
+                            <select name="status" id="edit_status" class="form-input" required>
+                                <option value="Active">Active</option>
+                                <option value="Upcoming">Upcoming</option>
+                                <option value="Completed">Completed</option>
+                                <option value="Suspended">Suspended</option>
+                            </select>
+
+                            <label for="edit_mobility_direction" style="margin-top:14px;">Mobility Direction</label>
+                            <select name="mobility_direction" id="edit_mobility_direction" class="form-input" required>
+                                <option value="outbound">Outbound</option>
+                                <option value="inbound">Inbound</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label for="edit_mobility_direction">Mobility Direction</label>
-                    <select name="mobility_direction" id="edit_mobility_direction" class="form-input" required>
-                        <option value="outbound">Outbound</option>
-                        <option value="inbound">Inbound</option>
-                    </select>
-                </div>
+                <div class="modal-section">
+                    <p class="modal-section-title">Partner &amp; Location</p>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="edit_program_country">Country</label>
-                        <select name="country_id" id="edit_program_country" class="form-input" required>
-                            <option value="">Select Country</option>
-                            <?php foreach ($countries as $country): ?>
-                                <option value="<?= (int)$country['id'] ?>"><?= h($country['country_name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="edit_program_country">Country</label>
+                            <select name="country_id" id="edit_program_country" class="form-input" required>
+                                <option value="">Select Country</option>
+                                <?php foreach ($countries as $country): ?>
+                                    <option value="<?= (int)$country['id'] ?>"><?= h($country['country_name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_program_partner">Partner Institution</label>
+                            <select name="partner_id" id="edit_program_partner" class="form-input" required>
+                                <option value="">Select Country First</option>
+                            </select>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="edit_program_partner">Partner Institution</label>
-                        <select name="partner_id" id="edit_program_partner" class="form-input" required>
-                            <option value="">Select Country First</option>
-                        </select>
-                    </div>
-                </div>
 
-                <div class="form-group">
-                    <label for="edit_slots">Capacity Ceiling (optional)</label>
-                    <input type="number" name="slots" id="edit_slots" class="form-input" min="0" step="1" value="0" required>
-                    <small class="form-hint">Leave at 0 if the partner has not confirmed a ceiling. Lowering it below approved applicants only shows a warning.</small>
-                    <label class="slots-confirm">
-                        <input type="checkbox" name="slots_confirmed" id="edit_slots_confirmed" value="1">
-                        Partner has confirmed this ceiling
-                    </label>
-                </div>
-
-                <div class="form-row">
                     <div class="form-group">
-                        <label for="edit_start">Program Start Date</label>
-                        <input type="date" name="start_date" id="edit_start" class="form-input" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="edit_end">Program End Date</label>
-                        <input type="date" name="end_date" id="edit_end" class="form-input" required>
+                        <label for="edit_slots">Capacity Ceiling (optional)</label>
+                        <input type="number" name="slots" id="edit_slots" class="form-input" min="0" step="1" value="0" required>
+                        <small class="form-hint">Leave at 0 if the partner has not confirmed a ceiling. Lowering it below approved applicants only shows a warning.</small>
+                        <label class="slots-confirm">
+                            <input type="checkbox" name="slots_confirmed" id="edit_slots_confirmed" value="1">
+                            Partner has confirmed this ceiling
+                        </label>
                     </div>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="edit_application_start_date">Application opens</label>
-                        <input type="date" name="application_start_date" id="edit_application_start_date" class="form-input">
-                    </div>
-                    <div class="form-group">
-                        <label for="edit_application_end_date">Application closes</label>
-                        <input type="date" name="application_end_date" id="edit_application_end_date" class="form-input">
-                    </div>
-                </div>
-                <small class="form-hint" id="edit_app_hint" style="margin-bottom:18px;"></small>
+                <div class="modal-section">
+                    <p class="modal-section-title">Schedule</p>
 
-                <div class="form-group">
-                    <label for="edit_nature_of_partnership">Nature of Partnership</label>
-                    <input type="text" name="nature_of_partnership" id="edit_nature_of_partnership" class="form-input" maxlength="255">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="edit_start">Program Start Date</label>
+                            <input type="date" name="start_date" id="edit_start" class="form-input" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_end">Program End Date</label>
+                            <input type="date" name="end_date" id="edit_end" class="form-input" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="edit_application_start_date">Application opens</label>
+                            <input type="date" name="application_start_date" id="edit_application_start_date" class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_application_end_date">Application closes</label>
+                            <input type="date" name="application_end_date" id="edit_application_end_date" class="form-input">
+                        </div>
+                    </div>
+                    <small class="form-hint" id="edit_app_hint"></small>
                 </div>
 
-                <div class="form-group">
-                    <label for="edit_description">Description</label>
-                    <textarea name="description" id="edit_description" class="form-input" required></textarea>
+                <div class="modal-section">
+                    <p class="modal-section-title">Additional Details</p>
+
+                    <div class="form-group">
+                        <label for="edit_nature_of_partnership">Nature of Partnership</label>
+                        <input type="text" name="nature_of_partnership" id="edit_nature_of_partnership" class="form-input" maxlength="255">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit_description">Description</label>
+                        <textarea name="description" id="edit_description" class="form-input" required></textarea>
+                    </div>
                 </div>
             </div>
 
@@ -853,135 +873,154 @@ $programs = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
 
             <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label" for="add_program_name"><i class="fa fa-book"></i> Program Name</label>
-                    <input type="text" name="program_name" id="add_program_name" class="form-input" required>
-                </div>
+                <div class="modal-section">
+                    <p class="modal-section-title">Basic Information</p>
 
-                <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label" for="add_program_types"><i class="fa fa-tag"></i> Program Types</label>
-                        <select name="program_types[]" id="add_program_types" class="form-input" multiple required>
-                            <?php foreach ($programTypes as $type): ?>
-                                <option value="<?= h($type['category_name']) ?>"><?= h($type['category_name']) ?></option>
-                            <?php endforeach; ?>
-                            <option value="Others">Others</option>
-                        </select>
-                        <small class="form-hint">Hold Ctrl (or Cmd) to select more than one.</small>
+                        <label class="form-label" for="add_program_name"><i class="fa fa-book"></i> Program Name</label>
+                        <input type="text" name="program_name" id="add_program_name" class="form-input" required>
                     </div>
-                    <div class="form-group">
-                        <label class="form-label" for="add_other_program_type">Other program type (when Others is selected)</label>
-                        <input type="text" name="other_program_type" id="add_other_program_type" class="form-input" maxlength="100">
-                    </div>
-                </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label" for="add_eligible_campuses">Eligible Campuses</label>
-                        <select name="eligible_campuses[]" id="add_eligible_campuses" class="form-input" multiple required>
-                            <?php foreach ($campusOptions as $campus): ?>
-                                <option value="<?= (int)$campus['id'] ?>"><?= h($campus['campus_name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="add_eligible_degree_programs">Eligible Degree Programs</label>
-                        <select name="eligible_degree_programs[]" id="add_eligible_degree_programs" class="form-input" multiple required>
-                            <?php foreach ($degreeProgramOptions as $degree): ?>
-                                <option value="<?= (int)$degree['id'] ?>" data-campus="<?= (int)$degree['campus_id'] ?>"><?= h($degree['program_name'] . ' — ' . $degree['campus_name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <small class="form-hint">Shows degree programs of the selected campuses.</small>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label" for="add_program_types"><i class="fa fa-tag"></i> Program Types</label>
+                            <select name="program_types[]" id="add_program_types" class="form-input" multiple required>
+                                <?php foreach ($programTypes as $type): ?>
+                                    <option value="<?= h($type['category_name']) ?>"><?= h($type['category_name']) ?></option>
+                                <?php endforeach; ?>
+                                <option value="Others">Others</option>
+                            </select>
+                            <small class="form-hint">Hold Ctrl (or Cmd) to select more than one.</small>
+                        </div>
+                        <div class="form-group other-type-group is-hidden" id="add_other_type_group">
+                            <label class="form-label" for="add_other_program_type">Custom Program Type</label>
+                            <input type="text" name="other_program_type" id="add_other_program_type" class="form-input" maxlength="100" placeholder="Enter the custom type...">
+                            <small class="form-hint">Shown when "Others" is selected.</small>
+                        </div>
                     </div>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label">Eligible Participants</label>
-                        <fieldset>
-                            <label><input type="checkbox" name="eligible_participant_types[]" value="student"> Student</label>
-                            <label><input type="checkbox" name="eligible_participant_types[]" value="faculty"> Faculty</label>
-                            <label><input type="checkbox" name="eligible_participant_types[]" value="non-teaching"> Non-teaching</label>
-                        </fieldset>
+                <div class="modal-section">
+                    <p class="modal-section-title">Eligibility</p>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label" for="add_eligible_campuses">Eligible Campuses</label>
+                            <select name="eligible_campuses[]" id="add_eligible_campuses" class="form-input" multiple required>
+                                <?php foreach ($campusOptions as $campus): ?>
+                                    <option value="<?= (int)$campus['id'] ?>"><?= h($campus['campus_name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="add_eligible_degree_programs">Eligible Degree Programs</label>
+                            <select name="eligible_degree_programs[]" id="add_eligible_degree_programs" class="form-input" multiple required>
+                                <?php foreach ($degreeProgramOptions as $degree): ?>
+                                    <option value="<?= (int)$degree['id'] ?>" data-campus="<?= (int)$degree['campus_id'] ?>"><?= h($degree['program_name'] . ' — ' . $degree['campus_name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="form-hint">Shows degree programs of the selected campuses.</small>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label class="form-label" for="add_status"><i class="fa fa-circle-dot"></i> Status</label>
-                        <select name="status" id="add_status" class="form-input" required>
-                            <option value="Active">Active</option>
-                            <option value="Upcoming">Upcoming</option>
-                            <option value="Completed">Completed</option>
-                            <option value="Suspended">Suspended</option>
-                        </select>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Eligible Participants</label>
+                            <fieldset id="add_participant_types">
+                                <label><input type="checkbox" name="eligible_participant_types[]" value="student"> Student</label>
+                                <label><input type="checkbox" name="eligible_participant_types[]" value="faculty"> Faculty</label>
+                                <label><input type="checkbox" name="eligible_participant_types[]" value="non-teaching"> Non-teaching</label>
+                            </fieldset>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="add_status"><i class="fa fa-circle-dot"></i> Status</label>
+                            <select name="status" id="add_status" class="form-input" required>
+                                <option value="Active">Active</option>
+                                <option value="Upcoming">Upcoming</option>
+                                <option value="Completed">Completed</option>
+                                <option value="Suspended">Suspended</option>
+                            </select>
+
+                            <label class="form-label" for="add_mobility_direction" style="margin-top:14px;">Mobility Direction</label>
+                            <select name="mobility_direction" id="add_mobility_direction" class="form-input" required>
+                                <option value="outbound">Outbound</option>
+                                <option value="inbound">Inbound</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label class="form-label" for="add_mobility_direction">Mobility Direction</label>
-                    <select name="mobility_direction" id="add_mobility_direction" class="form-input" required>
-                        <option value="outbound">Outbound</option>
-                        <option value="inbound">Inbound</option>
-                    </select>
-                </div>
+                <div class="modal-section">
+                    <p class="modal-section-title">Partner &amp; Location</p>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label" for="add_program_country"><i class="fa fa-globe"></i> Country</label>
-                        <select name="country_id" id="add_program_country" class="form-input" required>
-                            <option value="">Select Country</option>
-                            <?php foreach ($countries as $country): ?>
-                                <option value="<?= (int)$country['id'] ?>"><?= h($country['country_name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label" for="add_program_country"><i class="fa fa-globe"></i> Country</label>
+                            <select name="country_id" id="add_program_country" class="form-input" required>
+                                <option value="">Select Country</option>
+                                <?php foreach ($countries as $country): ?>
+                                    <option value="<?= (int)$country['id'] ?>"><?= h($country['country_name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="add_program_partner"><i class="fa fa-building"></i> Partner Institution</label>
+                            <select name="partner_id" id="add_program_partner" class="form-input" required>
+                                <option value="">Select Country First</option>
+                            </select>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label class="form-label" for="add_program_partner"><i class="fa fa-building"></i> Partner Institution</label>
-                        <select name="partner_id" id="add_program_partner" class="form-input" required>
-                            <option value="">Select Country First</option>
-                        </select>
-                    </div>
-                </div>
 
-                <div class="form-group">
-                    <label class="form-label" for="add_slots"><i class="fa fa-chair"></i> Capacity Ceiling (optional)</label>
-                    <input type="number" name="slots" id="add_slots" class="form-input" min="0" step="1" value="0" required>
-                    <small class="form-hint">Leave at 0 if the partner has not confirmed a ceiling.</small>
-                    <label class="slots-confirm">
-                        <input type="checkbox" name="slots_confirmed" id="add_slots_confirmed" value="1">
-                        Partner has confirmed this ceiling
-                    </label>
-                </div>
-
-                <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label" for="add_start"><i class="fa fa-calendar"></i> Program Start Date</label>
-                        <input type="date" name="start_date" id="add_start" class="form-input" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="add_end"><i class="fa fa-calendar-check"></i> Program End Date</label>
-                        <input type="date" name="end_date" id="add_end" class="form-input" required>
+                        <label class="form-label" for="add_slots"><i class="fa fa-chair"></i> Capacity Ceiling (optional)</label>
+                        <input type="number" name="slots" id="add_slots" class="form-input" min="0" step="1" value="0" required>
+                        <small class="form-hint">Leave at 0 if the partner has not confirmed a ceiling.</small>
+                        <label class="slots-confirm">
+                            <input type="checkbox" name="slots_confirmed" id="add_slots_confirmed" value="1">
+                            Partner has confirmed this ceiling
+                        </label>
                     </div>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label" for="add_application_start_date">Application opens</label>
-                        <input type="date" name="application_start_date" id="add_application_start_date" class="form-input" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="add_application_end_date">Application closes</label>
-                        <input type="date" name="application_end_date" id="add_application_end_date" class="form-input" required>
-                    </div>
-                </div>
-                <small class="form-hint" style="margin-bottom:18px;">The application closes automatically on its end date. The window locks once the first application is received.</small>
+                <div class="modal-section">
+                    <p class="modal-section-title">Schedule</p>
 
-                <div class="form-group">
-                    <label class="form-label" for="add_nature_of_partnership">Nature of Partnership</label>
-                    <input type="text" name="nature_of_partnership" id="add_nature_of_partnership" class="form-input" maxlength="255">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label" for="add_start"><i class="fa fa-calendar"></i> Program Start Date</label>
+                            <input type="date" name="start_date" id="add_start" class="form-input" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="add_end"><i class="fa fa-calendar-check"></i> Program End Date</label>
+                            <input type="date" name="end_date" id="add_end" class="form-input" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label" for="add_application_start_date">Application opens</label>
+                            <input type="date" name="application_start_date" id="add_application_start_date" class="form-input" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="add_application_end_date">Application closes</label>
+                            <input type="date" name="application_end_date" id="add_application_end_date" class="form-input" required>
+                        </div>
+                    </div>
+                    <small class="form-hint">The application closes automatically on its end date. The window locks once the first application is received.</small>
                 </div>
 
-                <div class="form-group">
-                    <label class="form-label" for="add_description"><i class="fa fa-align-left"></i> Description</label>
-                    <textarea name="description" id="add_description" class="form-input" required></textarea>
+                <div class="modal-section">
+                    <p class="modal-section-title">Additional Details</p>
+
+                    <div class="form-group">
+                        <label class="form-label" for="add_nature_of_partnership">Nature of Partnership</label>
+                        <input type="text" name="nature_of_partnership" id="add_nature_of_partnership" class="form-input" maxlength="255">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="add_description"><i class="fa fa-align-left"></i> Description</label>
+                        <textarea name="description" id="add_description" class="form-input" required></textarea>
+                    </div>
                 </div>
             </div>
 
@@ -1093,6 +1132,14 @@ document.addEventListener('DOMContentLoaded', function () {
         Array.from(select.options).forEach(o => { o.selected = chosen.has(o.value); });
     }
 
+    function toggleOtherType(selectId, groupId) {
+        const select = document.getElementById(selectId);
+        const group = document.getElementById(groupId);
+        if (!select || !group) return;
+        const hasOthers = Array.from(select.selectedOptions).some(o => o.value === 'Others');
+        group.classList.toggle('is-hidden', !hasOthers);
+    }
+
     const addCampuses  = document.getElementById('add_eligible_campuses');
     const addDegrees   = document.getElementById('add_eligible_degree_programs');
     const editCampuses = document.getElementById('edit_eligible_campuses');
@@ -1100,11 +1147,17 @@ document.addEventListener('DOMContentLoaded', function () {
     addCampuses.addEventListener('change',  () => syncDegreeOptions(addCampuses, addDegrees));
     editCampuses.addEventListener('change', () => syncDegreeOptions(editCampuses, editDegrees));
 
+    const addTypes = document.getElementById('add_program_types');
+    const editTypes = document.getElementById('edit_program_types');
+    addTypes.addEventListener('change', () => toggleOtherType('add_program_types', 'add_other_type_group'));
+    editTypes.addEventListener('change', () => toggleOtherType('edit_program_types', 'edit_other_type_group'));
+
     /* 4. ADD PROGRAM */
     document.getElementById('btnAddProgram').addEventListener('click', function () {
         document.getElementById('addProgramForm').reset();
         document.getElementById('add_program_partner').innerHTML = '<option value="">Select Country First</option>';
         syncDegreeOptions(addCampuses, addDegrees);
+        toggleOtherType('add_program_types', 'add_other_type_group');
         openModal('addProgramModal');
     });
     document.getElementById('add_program_country').addEventListener('change', function () {
@@ -1121,6 +1174,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (prefill) {
         document.getElementById('addProgramForm').reset();
         syncDegreeOptions(addCampuses, addDegrees);
+        toggleOtherType('add_program_types', 'add_other_type_group');
         document.getElementById('add_program_country').value = prefill.country_id;
         populatePartners(prefill.country_id, 'add_program_partner', prefill.partner_id);
         openModal('addProgramModal');
@@ -1149,6 +1203,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (customType) selectedTypes.push('Others');
             selectValues(typeSelect, selectedTypes);
             document.getElementById('edit_other_program_type').value = customType;
+            toggleOtherType('edit_program_types', 'edit_other_type_group');
 
             const participantValues = new Set(parseList(
                 data.eligible_participant_types,
