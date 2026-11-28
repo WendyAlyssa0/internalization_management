@@ -17,7 +17,7 @@ $currentRole = str_replace('_', ' ', $currentRole);
 
 if ($currentRole !== 'super admin') {
     http_response_code(403);
-    echo '<p style="padding:24px;font-family:sans-serif;">Access Denied — Super Admin only.</p>';
+    echo '<p style="padding:24px;font-family:Oswald,sans-serif;">Access Denied — Super Admin only.</p>';
     exit;
 }
 

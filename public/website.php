@@ -6,6 +6,7 @@ $pdo = db();
 
 $studentPrograms = [];
 $facultyPrograms = [];
+$nonTeachingPrograms = [];
 $loadError = null;
 
 try {
@@ -36,8 +37,9 @@ try {
         }
         $eligibleTypes = array_map(fn($t) => str_replace(['nonteaching', 'non_teaching', 'staff'], 'non-teaching', strtolower(trim((string)$t))), $eligibleTypes);
         $p['eligible_list'] = array_values(array_unique(array_filter($eligibleTypes)));
-        // Non-teaching personnel programs are listed with faculty programs and labelled as such
-        if (in_array('faculty', $eligibleTypes, true) || in_array('non-teaching', $eligibleTypes, true)) $facultyPrograms[] = $p;
+        // Each participant group has its own category; a program open to several groups appears in each
+        if (in_array('faculty', $eligibleTypes, true)) $facultyPrograms[] = $p;
+        if (in_array('non-teaching', $eligibleTypes, true)) $nonTeachingPrograms[] = $p;
         if (in_array('student', $eligibleTypes, true)) $studentPrograms[] = $p;
     }
 } catch (PDOException $ex) {
@@ -66,13 +68,17 @@ function buildStats(array $programs): array {
 
 $studentStats = buildStats($studentPrograms);
 $facultyStats = buildStats($facultyPrograms);
+$nonTeachingStats = buildStats($nonTeachingPrograms);
 
-$totalAll = count($studentPrograms) + count($facultyPrograms);
-$allCountries = array_unique(array_merge($studentStats['countries'], $facultyStats['countries']));
+// Distinct programs: one open to both students and faculty must count once
+$distinctIds = [];
+foreach (array_merge($studentPrograms, $facultyPrograms, $nonTeachingPrograms) as $p) $distinctIds[$p['id']] = true;
+$totalAll = count($distinctIds);
+$allCountries = array_unique(array_merge($studentStats['countries'], $facultyStats['countries'], $nonTeachingStats['countries']));
 $totalCountries = count($allCountries);
 
 $allInstitutions = [];
-foreach (array_merge($studentPrograms, $facultyPrograms) as $p) {
+foreach (array_merge($studentPrograms, $facultyPrograms, $nonTeachingPrograms) as $p) {
     if (!empty($p['institution_name'])) $allInstitutions[$p['institution_name']] = true;
 }
 $totalInstitutions = count($allInstitutions);
@@ -144,6 +150,11 @@ $studentRequirements = [
     'Completed application form',
     'Recommendation letter from a faculty member',
 ];
+$nonTeachingRequirements = [
+    'Must be a PSU non-teaching personnel',
+    'Completed application form with office/unit endorsement',
+    'Other requirements as specified by the International Affairs office',
+];
 $facultyRequirements = [
     'Must be a full-time PSU faculty member',
     'Minimum of 2 years teaching experience',
@@ -183,11 +194,13 @@ $facultyRequirements = [
     <ul class="nav-links" id="navLinks">
       <li><a href="#overview" class="nav-link" data-spy="overview">Overview</a></li>
       <li><a href="#about" class="nav-link" data-spy="about">About Us</a></li>
+      <li><a href="#announcements" class="nav-link" data-spy="announcements">Announcements</a></li>
       <li class="nav-dropdown">
         <a href="#studentPrograms" class="nav-link" data-spy="programs">Programs ▾</a>
         <ul class="dropdown-menu">
           <li><a href="#studentPrograms" data-spy="studentPrograms">Student Programs</a></li>
           <li><a href="#facultyPrograms" data-spy="facultyPrograms">Faculty Programs</a></li>
+          <li><a href="#nonTeachingPrograms" data-spy="nonTeachingPrograms">Non-teaching Programs</a></li>
         </ul>
       </li>
       <li><a href="#institutionsGrid" class="nav-link" data-spy="institutionsGrid">Partner Institutions</a></li>
@@ -370,7 +383,7 @@ $facultyRequirements = [
     <div class="audience-banner-icon">👩‍🏫</div>
     <div class="audience-banner-text">
       <h2>Programs for Faculty</h2>
-      <p>Teaching exchanges, research collaborations, and faculty development opportunities with our partner institutions. Some programs are also open to non-teaching personnel.</p>
+      <p>Teaching exchanges, research collaborations, and faculty development opportunities with our partner institutions.</p>
     </div>
     <div class="audience-banner-count"><?= (int)$facultyStats['totalPrograms'] ?><small>Programs</small></div>
   </div>
@@ -418,6 +431,64 @@ $facultyRequirements = [
       </div>
       <div id="facultyProgramListContainer"></div>
       <div class="pagination" id="facultyPaginationBar"></div>
+    </main>
+  </div>
+</section>
+
+<!-- NON-TEACHING PERSONNEL PROGRAMS -->
+<section class="audience-section" id="nonTeachingPrograms">
+  <div class="audience-banner nonteaching">
+    <div class="audience-banner-icon">🧑‍💼</div>
+    <div class="audience-banner-text">
+      <h2>Programs for Non-teaching Personnel</h2>
+      <p>Training, exchanges, internships, and development opportunities open to PSU non-teaching personnel and staff.</p>
+    </div>
+    <div class="audience-banner-count"><?= (int)$nonTeachingStats['totalPrograms'] ?><small>Programs</small></div>
+  </div>
+
+  <div class="page-body">
+    <aside class="sidebar">
+      <div class="filter-card">
+        <h3>Program Type</h3>
+        <div class="filter-group">
+          <?php foreach (['exchange' => 'Exchange', 'internship' => 'Internship', 'research' => 'Research', 'training' => 'Training'] as $v => $label): ?>
+            <label><input type="checkbox" data-filter="type" data-audience="non-teaching" value="<?= $v ?>" onchange="filterCards('non-teaching')"> <?= $label ?> <span class="badge-count"><?= (int)$nonTeachingStats['typeCounts'][$v] ?></span></label>
+          <?php endforeach; ?>
+        </div>
+      </div>
+      <div class="filter-card">
+        <h3>Country / Region</h3>
+        <select id="countryFilterNonTeaching" onchange="filterCards('non-teaching')">
+          <option value="">All Countries</option>
+          <?php foreach ($nonTeachingStats['countries'] as $countryName): ?>
+            <option><?= htmlspecialchars($countryName) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <div class="filter-card">
+        <h3>Duration</h3>
+        <div class="filter-group">
+          <?php foreach (['1 – 3 months', '4 – 6 months', '1 semester', '1 academic year'] as $d): ?>
+            <label><input type="checkbox" data-filter="duration" data-audience="non-teaching" value="<?= $d ?>" onchange="filterCards('non-teaching')"> <?= $d ?></label>
+          <?php endforeach; ?>
+        </div>
+      </div>
+      <button class="clear-btn" onclick="clearFilters('non-teaching')">Clear all filters</button>
+    </aside>
+
+    <main>
+      <div class="listings-header">
+        <div>
+          <h2>Available Non-teaching Programs</h2>
+          <span id="resultCountNonTeaching">Showing <?= (int)$nonTeachingStats['totalPrograms'] ?> of <?= (int)$nonTeachingStats['totalPrograms'] ?> programs</span>
+        </div>
+        <select class="sort-select" id="sortSelectNonTeaching">
+          <option value="deadline">Sort: Deadline (Soonest)</option>
+          <option value="az">Sort: A → Z</option>
+        </select>
+      </div>
+      <div id="nonTeachingProgramListContainer"></div>
+      <div class="pagination" id="nonTeachingPaginationBar"></div>
     </main>
   </div>
 </section>
@@ -507,6 +578,7 @@ $facultyRequirements = [
           <li><a href="#about">About Us</a></li>
           <li><a href="#studentPrograms">Student Programs</a></li>
           <li><a href="#facultyPrograms">Faculty Programs</a></li>
+          <li><a href="#nonTeachingPrograms">Non-teaching Programs</a></li>
           <li><a href="#institutionsGrid">Partner Institutions</a></li>
         </ul>
       </div>
@@ -531,7 +603,9 @@ $facultyRequirements = [
 <script>
   const rawStudentPrograms = <?= json_encode($studentPrograms, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
   const rawFacultyPrograms = <?= json_encode($facultyPrograms, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+  const rawNonTeachingPrograms = <?= json_encode($nonTeachingPrograms, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
   const rawPartners = <?= json_encode($partnersForJs, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+  const NONTEACHING_REQS = <?= json_encode($nonTeachingRequirements, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
   const STUDENT_REQS = <?= json_encode($studentRequirements, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
   const FACULTY_REQS = <?= json_encode($facultyRequirements, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 
@@ -598,6 +672,7 @@ $facultyRequirements = [
       applyEnd: formatDate(p.application_end_date),
       duration: computeDuration(p.start_date, p.end_date),
       eligible: eligibleLabel(p, audience),
+      eligibleList: p.eligible_list || [],
       availability: availabilityLabel(p),
       emoji: TYPE_EMOJI[type] || '🎓',
       urgent: isUrgent(deadlineRaw),
@@ -607,18 +682,24 @@ $facultyRequirements = [
 
   const studentPrograms = rawStudentPrograms.map(p => normalizeProgram(p, 'student'));
   const facultyPrograms = rawFacultyPrograms.map(p => normalizeProgram(p, 'faculty'));
+  const nonTeachingPrograms = rawNonTeachingPrograms.map(p => normalizeProgram(p, 'non-teaching'));
+  const COUNTRY_FILTER = { student: 'countryFilterStudent', faculty: 'countryFilterFaculty', 'non-teaching': 'countryFilterNonTeaching' };
+  const AUD_LABEL = { student: '🎓 Student', faculty: '👩‍🏫 Faculty', 'non-teaching': '🧑‍💼 Non-teaching' };
 
   // Institutions: every partner from the database, with their programs attached
   const institutions = {};
   rawPartners.forEach(pt => {
     institutions[pt.name] = { ...pt, country: pt.country || '—', programs: [], types: new Set() };
   });
-  [...studentPrograms, ...facultyPrograms].forEach(p => {
+  [...studentPrograms, ...facultyPrograms, ...nonTeachingPrograms].forEach(p => {
     if (!institutions[p.institution]) {
       institutions[p.institution] = { name: p.institution, country: p.country, logo: '', website: '', programs: [], types: new Set() };
     }
     const inst = institutions[p.institution];
     if (inst.country === '—') inst.country = p.country;
+    const dup = inst.programs.find(x => x.id === p.id);
+    if (dup) { dup.audiences.add(p.audience); return; }
+    p.audiences = new Set([p.audience]);
     inst.programs.push(p);
     inst.types.add(p.type);
   });
@@ -627,7 +708,8 @@ $facultyRequirements = [
   const PER_PAGE = 4;
   const state = {
     student: { all: studentPrograms, filtered: [...studentPrograms], page: 1, listContainer: 'studentProgramListContainer', paginationBar: 'studentPaginationBar', resultCount: 'resultCountStudent', sortSelect: 'sortSelectStudent' },
-    faculty: { all: facultyPrograms, filtered: [...facultyPrograms], page: 1, listContainer: 'facultyProgramListContainer', paginationBar: 'facultyPaginationBar', resultCount: 'resultCountFaculty', sortSelect: 'sortSelectFaculty' }
+    faculty: { all: facultyPrograms, filtered: [...facultyPrograms], page: 1, listContainer: 'facultyProgramListContainer', paginationBar: 'facultyPaginationBar', resultCount: 'resultCountFaculty', sortSelect: 'sortSelectFaculty' },
+    'non-teaching': { all: nonTeachingPrograms, filtered: [...nonTeachingPrograms], page: 1, listContainer: 'nonTeachingProgramListContainer', paginationBar: 'nonTeachingPaginationBar', resultCount: 'resultCountNonTeaching', sortSelect: 'sortSelectNonTeaching' }
   };
 
   /* ---------- Partner institutions (logo-only, link out) ---------- */
@@ -688,11 +770,12 @@ $facultyRequirements = [
     document.getElementById('profileStatTypes').textContent = inst.types.size;
     document.getElementById('profileStatCountry').textContent = inst.country;
 
-    const sc = inst.programs.filter(p => p.audience === 'student').length;
-    const fc = inst.programs.filter(p => p.audience === 'faculty').length;
+    const sc = inst.programs.filter(p => p.audiences.has('student')).length;
+    const fc = inst.programs.filter(p => p.audiences.has('faculty')).length;
+    const nc = inst.programs.filter(p => p.audiences.has('non-teaching')).length;
     document.getElementById('profileAbout').textContent =
       `${inst.name} is a partner institution of Pangasinan State University` + (inst.country !== '—' ? ` located in ${inst.country}` : '') + `. ` +
-      `Through this partnership, PSU offers ${sc} student program${sc !== 1 ? 's' : ''} and ${fc} faculty program${fc !== 1 ? 's' : ''} with this institution.`;
+      `Through this partnership, PSU offers ${sc} student program${sc !== 1 ? 's' : ''}, ${fc} faculty program${fc !== 1 ? 's' : ''} and ${nc} non-teaching program${nc !== 1 ? 's' : ''} with this institution.`;
     document.getElementById('profileProgramCount').textContent = `${inst.programs.length} program${inst.programs.length !== 1 ? 's' : ''} available`;
 
     if (inst.description) document.getElementById('profileAbout').textContent = inst.description;
@@ -712,7 +795,7 @@ $facultyRequirements = [
       const item = document.createElement('div');
       item.className = 'profile-program-item';
       item.onclick = () => { closeProfileDirect(); openModal(p); };
-      const aud = p.audience === 'faculty' ? '👩‍🏫 Faculty' : '🎓 Student';
+      const aud = [...p.audiences].map(a => AUD_LABEL[a]).join(' + ');
       item.innerHTML = `
         <div class="profile-program-emoji">${p.emoji}</div>
         <div>
@@ -769,6 +852,7 @@ $facultyRequirements = [
             <span class="tag type-${esc(p.type)}">${esc(capitalize(p.type))}</span>
             <span class="tag">⏱ ${esc(p.duration)}</span>
             <span class="tag">👥 ${esc(p.eligible)}</span>
+            <span class="tag">📅 ${esc(p.availability)}</span>
           </div>
         </div>`;
       card.querySelector('.card-institution').onclick = ev => { ev.stopPropagation(); openProfile(p.institution); };
@@ -837,7 +921,7 @@ $facultyRequirements = [
       <div class="meta-item"><div class="label">Application period</div><div class="value">${esc(p.applyStart)} – ${esc(p.applyEnd)}</div></div>
       <div class="meta-item"><div class="label">Duration</div><div class="value">${esc(p.duration)}</div></div>
       <div class="meta-item"><div class="label">Country</div><div class="value">${esc(p.country)}</div></div>`;
-    const reqs = isFaculty ? FACULTY_REQS : STUDENT_REQS;
+    const reqs = p.audience === 'student' ? STUDENT_REQS : p.audience === 'non-teaching' ? NONTEACHING_REQS : FACULTY_REQS;
     document.getElementById('modalReqs').innerHTML = reqs.map(r => `<li>${esc(r)}</li>`).join('');
     document.getElementById('applyLink').href = 'register.php?program_id=' + encodeURIComponent(p.id) + '&account_type=' + p.audience;
     document.getElementById('modalOverlay').classList.add('open');
@@ -864,7 +948,7 @@ $facultyRequirements = [
     const checked = f => [...document.querySelectorAll(`input[type=checkbox][data-filter="${f}"][data-audience="${audience}"]:checked`)].map(c => c.value);
     const checkedTypes = checked('type');
     const checkedDurations = checked('duration');
-    const countryEl = document.getElementById(audience === 'student' ? 'countryFilterStudent' : 'countryFilterFaculty');
+    const countryEl = document.getElementById(COUNTRY_FILTER[audience]);
     const countryVal = countryEl ? countryEl.value : '';
 
     s.filtered = s.all.filter(p =>
@@ -876,11 +960,11 @@ $facultyRequirements = [
     );
     renderPrograms(audience, 1);
   }
-  function applySearch() { applySearchToAudience('student'); applySearchToAudience('faculty'); }
+  function applySearch() { applySearchToAudience('student'); applySearchToAudience('faculty'); applySearchToAudience('non-teaching'); }
   function filterCards(audience) { applySearchToAudience(audience); }
   function clearFilters(audience) {
     document.querySelectorAll(`input[type=checkbox][data-audience="${audience}"]`).forEach(cb => cb.checked = false);
-    const countryEl = document.getElementById(audience === 'student' ? 'countryFilterStudent' : 'countryFilterFaculty');
+    const countryEl = document.getElementById(COUNTRY_FILTER[audience]);
     if (countryEl) countryEl.value = '';
     document.getElementById('searchInput').value = '';
     document.getElementById('typeFilter').value = '';
@@ -909,10 +993,10 @@ $facultyRequirements = [
     document.getElementById('navToggle').addEventListener('click', () => links.classList.toggle('open'));
     links.addEventListener('click', e => { if (e.target.closest('a')) links.classList.remove('open'); });
 
-    const ids = ['overview', 'about', 'announcements', 'studentPrograms', 'facultyPrograms', 'institutionsGrid'];
+    const ids = ['overview', 'about', 'announcements', 'studentPrograms', 'facultyPrograms', 'nonTeachingPrograms', 'institutionsGrid'];
     const sections = ids.map(id => document.getElementById(id)).filter(Boolean);
-    const groupOf = id => (id === 'studentPrograms' || id === 'facultyPrograms') ? 'programs'
-                        : id === 'announcements' ? 'overview' : id;
+    const groupOf = id => (id === 'studentPrograms' || id === 'facultyPrograms' || id === 'nonTeachingPrograms') ? 'programs'
+                        : id;
     function setActive(id) {
       document.querySelectorAll('[data-spy]').forEach(a => a.classList.remove('active'));
       document.querySelectorAll(`[data-spy="${id}"], [data-spy="${groupOf(id)}"]`).forEach(a => a.classList.add('active'));
@@ -933,8 +1017,10 @@ $facultyRequirements = [
   renderInstitutions();
   renderPrograms('student', 1);
   renderPrograms('faculty', 1);
+  renderPrograms('non-teaching', 1);
   bindSort('student');
   bindSort('faculty');
+  bindSort('non-teaching');
 </script>
 </body>
 </html>

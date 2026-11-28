@@ -250,6 +250,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_create'])) {
 
                 $createSuccess = true;
                 $_SESSION['csrf'] = bin2hex(random_bytes(32));
+                $_SESSION['flash'] = "Account created successfully for {$firstName} {$lastName}.";
+                header('Location: dashboard.php?page=users');
+                exit();
             } catch (PDOException $e) {
                 $createErrors[] = 'Database error. Please try again.';
                 error_log('users.php create error: ' . $e->getMessage());
@@ -396,6 +399,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_edit'])) {
 
         $editSuccess = true;
         $_SESSION['csrf'] = bin2hex(random_bytes(32));
+        $_SESSION['flash'] = "Changes saved for {$firstName} {$lastName}.";
+        header('Location: dashboard.php?page=users');
+        exit();
     }
 
     $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ? LIMIT 1");
@@ -463,7 +469,7 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <link rel="stylesheet" href="../asset/css/users.css">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
 <div class="content">

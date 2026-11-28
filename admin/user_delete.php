@@ -55,7 +55,7 @@ function h($v) {
 </head>
 <body>
 
-<div style="padding:20px; font-family:Arial;">
+<div style="padding:20px; font-family:Oswald,sans-serif;">
 
     <h2>Delete User</h2>
 

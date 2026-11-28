@@ -70,6 +70,18 @@ $lastName  = $_SESSION['last_name']  ?? '';
 $role      = strtolower(trim((string)($_SESSION['user_role'] ?? '')));
 $role      = str_replace('_', ' ', $role);
 $fullName  = trim("$firstName $lastName");
+
+// Avatar initials (first + last name) and a readable role label
+$initials = strtoupper(mb_substr($firstName, 0, 1) . mb_substr($lastName, 0, 1));
+if ($initials === '') $initials = 'U';
+$roleLabels = [
+    'admin'       => 'Administrator',
+    'administrator' => 'Administrator',
+    'coordinator' => 'Coordinator',
+    'ovplia staff' => 'OVPLIA Staff',
+    'approver'    => 'Approver',
+];
+$roleLabel = $roleLabels[$role] ?? ucwords($role);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -80,6 +92,7 @@ $fullName  = trim("$firstName $lastName");
     <link rel="stylesheet" href="../asset/css/dashboard.css">
     <link rel="stylesheet" href="../asset/css/sidebar_theme.css">
     <link rel="stylesheet" href="../asset/css/report.css">
+    <link rel="stylesheet" href="../asset/css/admin_fonts.css">
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined">
@@ -95,10 +108,18 @@ $fullName  = trim("$firstName $lastName");
         </button>
         <span class="topbar-title">PSU Internationalization</span>
     </div>
-    <div class="user">
-        <span class="material-symbols-outlined">account_circle</span>
-        <span><?= htmlspecialchars($fullName, ENT_QUOTES, 'UTF-8') ?></span>
+<div class="user" title="<?= htmlspecialchars($fullName . ($roleLabel !== '' ? ' · ' . $roleLabel : ''), ENT_QUOTES, 'UTF-8') ?>">
+    <div class="user-avatar">
+        <?= htmlspecialchars($initials, ENT_QUOTES, 'UTF-8') ?>
+        <span class="status-dot"></span>
     </div>
+    <div class="user-info">
+        <span class="user-name"><?= htmlspecialchars($fullName, ENT_QUOTES, 'UTF-8') ?></span>
+        <?php if ($roleLabel !== ''): ?>
+            <span class="user-role"><?= htmlspecialchars($roleLabel, ENT_QUOTES, 'UTF-8') ?></span>
+        <?php endif; ?>
+    </div>
+</div>
 </div>
 
 <div class="container">

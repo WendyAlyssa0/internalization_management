@@ -241,3 +241,16 @@ footer{background:var(--psu-navy);color:#fff;padding:80px 24px 40px;margin-top:8
   .profile-banner-inner{flex-direction:column;text-align:center}
   .profile-stats{flex-wrap:wrap}.profile-stat{flex:1 1 50%;border-bottom:1px solid var(--border-light)}
 }
+.audience-banner.nonteaching{background:#fff;border:2px solid var(--psu-blue);border-left:8px solid var(--psu-gold);color:var(--psu-navy)}
+.audience-banner.nonteaching .audience-banner-icon{background:rgba(0,15,218,.08)}
+/* LION BACKGROUND
+   Lion image: /assets/psu-lion.png. If missing, nothing breaks.
+   Clean layout: one lion, fully visible, right side of the hero; decorative globe removed. */
+:root{--lion-url:url('../img/psu-lion.png');--lion-hero-opacity:.09}
+.hero-globe,.hero-bg-dots{display:none}
+.hero{background:linear-gradient(180deg,#f4f7fb 0%,#eef3fb 100%)}
+.hero::before{content:'';position:absolute;right:max(32px,calc((100vw - 1200px)/2));bottom:48px;width:min(440px,34vw);aspect-ratio:942/701;background:var(--lion-url) no-repeat center/contain;opacity:var(--lion-hero-opacity);pointer-events:none;z-index:1}
+/* thin gold accent line under the hero instead of the heavy globe */
+.hero::after{content:'';position:absolute;left:0;right:0;bottom:0;height:4px;background:linear-gradient(90deg,var(--psu-blue),var(--psu-gold));z-index:2}
+@media (max-width:1100px){.hero::before{width:300px;right:16px;bottom:24px;--lion-hero-opacity:.07}}
+@media (max-width:768px){.hero::before{display:none}}

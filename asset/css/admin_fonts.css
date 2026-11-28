@@ -1,0 +1,45 @@
+/* Shared typography for every routed admin page. */
+:root {
+    --font-sans: 'Oswald', 'Segoe UI', system-ui, sans-serif;
+    --font-display: 'Oswald', 'Segoe UI', system-ui, sans-serif;
+    --font-body: 'Oswald', 'Segoe UI', system-ui, sans-serif;
+    --font-heading: 'Oswald', 'Segoe UI', system-ui, sans-serif;
+    --font-label: 'Oswald', 'Segoe UI', system-ui, sans-serif;
+}
+
+body,
+body div,
+body span,
+body li,
+body ul,
+body ol,
+body dl,
+body dt,
+body dd,
+body h1,
+body h2,
+body h3,
+body h4,
+body h5,
+body h6,
+body p,
+body a,
+body button,
+body input,
+body textarea,
+body select,
+body label,
+body small,
+body strong,
+body b,
+body td,
+body th,
+body code,
+body kbd,
+body samp {
+    font-family: 'Oswald', 'Segoe UI', system-ui, sans-serif !important;
+}
+
+body .material-symbols-outlined {
+    font-family: 'Material Symbols Outlined' !important;
+}
